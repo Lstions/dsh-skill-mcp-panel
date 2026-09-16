@@ -1,0 +1,16 @@
+# Dependencies are installed per plugin; never commit them.
+node_modules/
+
+# Package-manager and build leftovers
+*.log
+.pnpm-debug.log*
+.npm/
+
+# Editor and OS noise
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Scratch output from the test helpers
+.verify/
