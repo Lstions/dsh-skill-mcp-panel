@@ -53,16 +53,58 @@ the skill and its competing files, rather than one line per duplicate.
 ## Settings UI
 
 The plugin registers the `skill-nesting` settings namespace, so it appears in
-**Settings → Plugins** (that tab enumerates registered Host namespaces and
-dispatches a card keyed by namespace).
+**Settings → Plugins** under the "configurable" tab (that tab enumerates
+registered Host namespaces and dispatches a card keyed by namespace).
 
-The card edits every field live — roots, depth, duplicate policy, watch
-behaviour, provider name. Apply writes **only the fields you changed** as one
-atomic op list, so a value you never saw cannot be cleared by a save.
+The card follows the same conventions as the shipped plugin cards:
+
+- **A collapsed disclosure card.** It renders an `<li>` with a header button
+  (name + description + chevron) and discloses its controls in place, rather
+  than spilling a flat form down the page. Collapsed is the default; it
+  auto-collapses again once a save settles.
+- **Bilingual.** `zh` and `en` dictionaries are registered through `ctx.locale`,
+  and the slot declares its locale namespace, so the card follows the active
+  locale — no re-registration needed on a language switch. Labels, hints and
+  validation messages are all translated.
+- **Staged edits.** Controls hold drafts; **Save** writes only the fields you
+  changed as one atomic op list, so a value you never saw cannot be cleared.
+  **Discard changes** drops the draft. A field with a user override shows an
+  *Overridden* badge and a *Reset* action that writes an `unset`.
+- **Per-field validation.** Out-of-range depth, a non-numeric value, an empty
+  provider name and an unknown policy mark the field and disable Save with an
+  explanation, instead of failing at the Host.
+- **An *Unsaved* badge** marks a pending edit.
+
+The intro copy is shown only once expanded. A namespace this Host does not serve
+renders **nothing at all**, so an uncomposed plugin leaves no trace on the page.
 
 Changes take effect immediately with no restart and no composition edit. The
 composition row's `config` remains the base layer; the settings document layers
 over it, and the plugin falls back to the row if settings detach.
+
+### Why the card can appear empty over a non-loopback address
+
+Reading the settings document is gated by DSH itself, not by this plugin:
+`dsh-client-ui-settings` computes
+
+```js
+const persistence = ctx.remote.$host.isLoopback ? "host" : "memory";
+```
+
+and `isLoopback` is true only for `localhost`, `[::1]`, and `127/8`. On any other
+address — `100.64.0.10`, `192.168.20.3`, `R5-5600.local` — persistence is
+`memory`, the scope starts `unavailable`, and the mirror never crosses the wire.
+This is documented as a known limitation in `dsh-client-ui-settings`:
+
+> Non-loopback pages get no durable settings — this Client keeps Host persistence
+> disabled there, so a scope starts `unavailable` and never crosses the wire;
+> every row it backs is inert even though Connection authentication covers the API.
+
+Note the plugin **list** still renders over such an address, because it reads a
+different source (`remote.pluginInventory`, a plain RPC). So "plugin list is
+visible but every configuration card is empty" is the expected signature of this
+gate. Use `http://127.0.0.1:<port>` (or an SSH tunnel) to configure plugins. The
+namespace itself registers fine either way.
 
 ## Install
 
@@ -149,9 +191,10 @@ lib/client.js   browser half: the Settings → Plugins card
 
 `lib/client.js` is a hand-written `window.__ModuleLoader__.load({ id, factory })`
 bundle (the format `tsdown` emits), so no build step is needed. It requires only
-`react` from the platform seed. If it ever grows a real build step, keep the
-bundle path in `exports["./client"]` and the `dsh.client` block in `package.json`
-in sync.
+`react` from the platform seed — styles are injected as a scoped `<style>` tag
+and UI text comes from the locale dictionaries, so it needs no other package. If
+it ever grows a real build step, keep the bundle path in `exports["./client"]`
+and the `dsh.client` block in `package.json` in sync.
 
 ## Tests
 
@@ -169,9 +212,12 @@ node test/realtree.mjs [root ...]     # report what the real tree yields
 succeeds for real rather than against a stub. Point `DSH_PROFILE_DIR` at another
 profile if needed; it skips cleanly when the provider is absent.
 
-`test/client.mjs` loads the real browser bundle under a minimal React and slot
-harness, which is the only way to exercise the card's actual diffing behaviour
-without a browser.
+`test/client.mjs` loads the real browser bundle under a minimal React, locale,
+and slot harness. It drives the card as a user would — expand it, edit a control,
+save — and asserts collapsed-by-default disclosure, diff-based writes, per-field
+validation, override/reset, and that both dictionaries are complete and resolve
+under a locale switch. That is the only way to exercise the card's real
+behaviour without a browser.
 
 ## Requirements
 
