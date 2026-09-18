@@ -1,5 +1,6 @@
 /**
- * dsh-skill-nesting — a recursive, multi-root skill provider.
+ * dsh-skill-nesting — a recursive, multi-root skill provider with a live
+ * management channel (skill toggles, conflict reporting, MCP inventory).
  *
  * WHY THIS EXISTS
  * The built-in `@deepseek-ai/dsh-skill-filesystem` provider scans a skill root
@@ -21,13 +22,24 @@
  * `skills` is a host+per-scope layered registry. A provider registered from the
  * host composition lands in the GLOBAL layer, so every session — including
  * subagents and every agent preset — sees the nested catalog. Registering this
- * from one preset would hide it from all the others.
+ * from one preset would hide it from all the others. The same fact bounds what
+ * this plugin can do: a NEARER (preset) layer wins a duplicate name outright,
+ * so a skill owned by a preset CANNOT be disabled from here. That is reported
+ * honestly rather than papered over — see `lib/toggle.js`.
+ *
+ * THE MANAGEMENT CHANNEL
+ * The harness gives a browser on a non-loopback address a memory-only settings
+ * scope, so `settingsScope` cards are empty over a LAN. This row therefore also
+ * publishes `GET /skill-nesting/state` and `POST /skill-nesting/apply` on the
+ * harness web server (`lib/http.js`), which work identically on loopback and on
+ * a LAN address. Reads mask secrets; writes require a same-origin JSON request.
+ * Endpoints are deliberately NOT under `/api`, which is the gateway's RPC face.
  *
  * CONFIGURATION
  * The row's composition `config` is the base layer, and `ctx.settings`
  * namespace `skill-nesting` (edited from Settings → Plugins) layers over it, so
- * roots and policy change live without editing the composition. Changes are
- * picked up through the registration below, which re-derives and re-watches.
+ * roots, policy, the skill disable table and the MCP declarations all change
+ * live without editing the composition.
  *
  * @module dsh-skill-nesting
  */
@@ -36,6 +48,19 @@ import { watch } from 'node:fs'
 import { homedir } from 'node:os'
 import { resolve } from 'node:path'
 import z from '@deepseek-ai/schemastery'
+import { OP, STATUS, WRITE_ACCESS } from './contract.js'
+import { createHttpRoutes, refusal } from './http.js'
+import { createMcpManager } from './mcp.js'
+import { createStateBuilder } from './state.js'
+import {
+  Suppressor,
+  describeVerdict,
+  planToggle,
+  readCatalog,
+  readToggles,
+  verifyDisabled,
+  verifyEnabled,
+} from './toggle.js'
 
 export const name = 'skill-nesting'
 export const inject = ['skills']
@@ -69,6 +94,10 @@ const DEFAULT_DEBOUNCE_MS = 250
  * `z.union` of two `z.const` members renders as an enum in the generated client
  * form while staying a plain string at runtime, which is what the browser card
  * needs to offer a select without any client-side schema knowledge.
+ *
+ * `skills` is the persisted disable table: `{ '<name>': true }`. Enabling a
+ * skill UNSETS its key, so the schema default (`false`) carries the meaning and
+ * a re-enabled skill leaves no residue in the settings document.
  */
 export const Config = z.object({
   providerName: z.string().min(1).default('nested-filesystem'),
@@ -87,6 +116,12 @@ export const Config = z.object({
   watchDebounceMs: z.number().min(50).default(DEFAULT_DEBOUNCE_MS),
   /** How a skill name provided by several files is resolved. */
   duplicatePolicy: z.union([z.const('first-wins'), z.const('error')]).default('first-wins'),
+  /** Persisted skill disable table: `{ '<name>': true }` means "disabled". */
+  skills: z.dict(z.boolean()).default({}),
+  /** Who may write through the plugin's own HTTP endpoint. */
+  writeAccess: z.union([z.const('same-origin'), z.const('loopback')]).default(WRITE_ACCESS.SAME_ORIGIN),
+  /** MCP servers this plugin declares and owns (see `lib/mcp.js`). */
+  mcpServers: z.array(z.any()).default([]),
 })
 
 /** Normalise `roots`, expanding `~` and resolving to absolute paths, preserving order. */
@@ -203,6 +238,15 @@ function findFrontmatterEnd(text, from) {
  * textual: two roots that are the same directory (`~/.agents/skills` is
  * commonly a symlink to `~/.hermes/skills`) share a `targetKey`, so the same
  * file reached twice is recognised as one skill instead of a conflict.
+ *
+ * HOW DISABLING WORKS
+ * A disabled name is WON by a suppression candidate (rank 0, both invocation
+ * flags false) and `get()` answers `undefined` for it. Winning the name is the
+ * only thing that actually suppresses it: simply not publishing it would yield
+ * the name to any same-layer competitor, which then serves the skill the user
+ * believes they turned off. See `lib/toggle.js` for the measured comparison.
+ * The provider never writes to or deletes a skill file: a toggle changes only
+ * what this provider advertises.
  */
 class NestedSkillProvider {
   /**
@@ -213,7 +257,15 @@ class NestedSkillProvider {
     this.ctx = ctx
     this.options = options
     /** Diagnostics from the most recent `list()`, read by the client surface. */
-    this.lastReport = { skills: 0, duplicates: [], skipped: [], roots: [], errors: [] }
+    this.lastReport = { skills: 0, duplicates: [], skipped: [], roots: [], errors: [], duplicatePolicy: 'first-wins' }
+    /**
+     * Structured result of the most recent scan: which files claim each name
+     * and which roots were reachable. Read by `lib/state.js` to build conflicts
+     * and root rows without re-walking the tree.
+     */
+    this.lastIndex = { byName: new Map(), roots: [] }
+    /** The live disable table; toggles flow in through the settings `onChange`. */
+    this.suppressor = new Suppressor({ providerName: 'nested-filesystem' })
   }
 
   get name() {
@@ -227,6 +279,13 @@ class NestedSkillProvider {
   /**
    * Discover every skill below every configured root.
    * A root that is missing or unreadable is skipped, never fatal.
+   *
+   * Suppression candidates for disabled names are APPENDED to the real
+   * candidates: the registry then has our candidate winning that name with both
+   * invocation flags false, and every model-facing and user-facing consumer
+   * filters it out. See `lib/toggle.js` for why winning the name is the only
+   * mechanism that works.
+   *
    * @returns {Promise<object[]>} registry candidates.
    */
   async list() {
@@ -240,27 +299,45 @@ class NestedSkillProvider {
       errors: [],
       duplicatePolicy: config.duplicatePolicy,
     }
+    const index = { byName: new Map(), roots: [] }
     this.lastReport = report
-    if (fs === undefined || config.roots.length === 0) return []
+    this.lastIndex = index
+    this.suppressor.providerName = config.providerName
+    if (fs === undefined || config.roots.length === 0) {
+      // With no roots there is still discovery metadata to hand the suppressor
+      // for names the settings table already disables.
+      this.suppressor.set(readToggles(config), this.#knownFrom(index))
+      return this.suppressor.size > 0 ? this.suppressor.candidates() : []
+    }
 
-    /** name -> { path, rootIndex, depth, canonical } of the winning entry. */
+    /** name -> the winning entry recorded in `index.byName`. */
     const winners = new Map()
     /** canonical path -> root that already supplied it. Overlapping roots are not conflicts. */
     const seenFiles = new Map()
-    const conflicts = new Set()
     const candidates = []
 
     for (let rootIndex = 0; rootIndex < config.roots.length; rootIndex += 1) {
       const root = config.roots[rootIndex]
       const target = await this.#resolveDirectory(fs, root, report)
+      const rootEntry = { path: root, exists: target !== undefined, skillCount: 0 }
+      index.roots.push(rootEntry)
       if (target === undefined) continue
-      await this.#walk(fs, target, 0, { rootIndex, root, winners, seenFiles, conflicts, candidates, report }, true)
+      await this.#walk(fs, target, 0, {
+        rootIndex, root, winners, seenFiles, candidates, report, index, rootEntry,
+      }, true, [])
     }
 
-    for (const [skillName, paths] of [...winners].filter(([, entry]) => entry.conflict).map(([n, e]) => [n, e.paths])) {
-      report.duplicates.push({ name: skillName, paths })
+    for (const [skillName, entry] of winners) {
+      if (entry.conflict) report.duplicates.push({ name: skillName, paths: entry.paths })
     }
-    report.skills = candidates.length
+
+    // Suppression candidates go last: they must coexist with the real ones, and
+    // the registry decides the winner by rank (ours is lowest, so it wins).
+    this.suppressor.set(readToggles(config), this.#knownFrom(index))
+    const suppressions = this.suppressor.candidates()
+    const visible = candidates.filter((candidate) => !this.suppressor.omits(candidate))
+    report.skills = visible.length
+    report.suppressed = suppressions.length
 
     if (report.duplicates.length > 0) {
       const detail = report.duplicates
@@ -275,19 +352,34 @@ class NestedSkillProvider {
     if (report.skipped.length > 0) {
       this.ctx.logger.warn(`skill-nesting: skipped ${report.skipped.length} unreadable or invalid skill file(s)`)
     }
-    return candidates
+    return [...visible, ...suppressions]
+  }
+
+  /** name -> discovery metadata, for names the settings table already disables. */
+  #knownFrom(index) {
+    const known = new Map()
+    for (const [name, entry] of index.byName) {
+      if (entry.winner !== undefined) known.set(name, entry.winner)
+    }
+    return known
   }
 
   /**
    * Load a winning candidate's body from its locator.
+   *
+   * A suppressed candidate answers `undefined`, so the `skill` tool reports the
+   * name as unknown rather than loading an empty or stale body.
+   *
    * @param {object} candidate - candidate previously returned by {@link list}.
    * @returns {Promise<object | undefined>} the full definition, or undefined if it vanished.
    */
   async get(candidate) {
+    if (candidate === undefined || candidate === null) return undefined
+    if (this.suppressor.omits(candidate)) return undefined
     const fs = this.ctx.get('fs')
     if (fs === undefined) return undefined
     const locator = candidate.locator
-    const text = await this.#readText(fs, locator.path)
+    const text = await this.#readText(fs, locator?.path ?? candidate.path)
     if (text === undefined) return undefined
     const parsed = parseSkill(text)
     if (parsed === undefined) return undefined
@@ -340,14 +432,17 @@ class NestedSkillProvider {
    * skill's own bundled resources can never be mistaken for skills. Every other
    * directory is a category and is descended into until `maxDepth`.
    */
-  async #walk(fs, directory, level, state, isRoot) {
+  async #walk(fs, directory, level, state, isRoot, trail) {
     const entries = await this.#listDir(fs, directory.target)
     if (entries === undefined) return
 
     if (!isRoot) {
+      // `trail` is the path from the root to THIS directory. A directory that
+      // holds `SKILL.md` IS a skill, so the category is everything above it.
+      const category = trail.slice(0, -1).join('/')
       for (const entry of entries) {
         if (entry.name === 'SKILL.md' && entry.type === 'file') {
-          await this.#collect(fs, entry, directory, level, state)
+          await this.#collect(fs, entry, directory, level, state, category)
           return
         }
       }
@@ -364,7 +459,7 @@ class NestedSkillProvider {
       if (entry.type !== 'directory') continue
       if (!this.config.includeHidden && entry.name.startsWith('.')) continue
       const child = { target: entry.target, displayPath: entry.target.displayPath }
-      await this.#walk(fs, child, level + 1, state, false)
+      await this.#walk(fs, child, level + 1, state, false, [...trail, entry.name])
     }
   }
 
@@ -377,7 +472,7 @@ class NestedSkillProvider {
    * distinct files claiming one name are duplicates, and those follow the
    * configured policy.
    */
-  async #collect(fs, entry, directory, level, state) {
+  async #collect(fs, entry, directory, level, state, category) {
     const path = entry.target.displayPath
     const canonical = entry.target.targetKey
 
@@ -395,6 +490,23 @@ class NestedSkillProvider {
       return
     }
     if (!parsed.invocation.modelInvocable) return
+
+    // The category comes from the WALK, never from prefix-matching the path
+    // against the root: `ctx.fs` returns a realpath'd displayPath, so a
+    // symlinked root (`~/.agents/skills` -> `~/.hermes/skills`) would never
+    // match its own configured root and every category would come out empty.
+    const record = {
+      path, canonical, root: state.root, rootIndex: state.rootIndex,
+      category, rank: this.config.rank, description: parsed.description,
+    }
+
+    let indexed = state.index.byName.get(parsed.name)
+    if (indexed === undefined) {
+      indexed = { entries: [], winner: record, conflict: false, withheld: false }
+      state.index.byName.set(parsed.name, indexed)
+    }
+    indexed.entries.push(record)
+    state.rootEntry.skillCount += 1
 
     const existing = state.winners.get(parsed.name)
     if (existing === undefined) {
@@ -416,9 +528,11 @@ class NestedSkillProvider {
     // entirely. Both must withdraw a name already published this pass.
     if (existing.conflict) return
     existing.conflict = true
+    indexed.conflict = true
     if (this.config.duplicatePolicy === 'error') {
-      const index = state.candidates.findIndex((candidate) => candidate.name === parsed.name)
-      if (index !== -1) state.candidates.splice(index, 1)
+      indexed.withheld = true
+      const at = state.candidates.findIndex((candidate) => candidate.name === parsed.name)
+      if (at !== -1) state.candidates.splice(at, 1)
     }
   }
 
@@ -537,8 +651,12 @@ function resolveConfig(raw) {
   return Config(raw ?? {})
 }
 
+/** Operation kinds this module handles itself; everything else MCP owns. */
+const MCP_KINDS = new Set([OP.MCP_TOGGLE, OP.MCP_CONFIGURE, OP.MCP_ADD, OP.MCP_REMOVE])
+
 /**
- * Register the recursive provider on `ctx.skills`.
+ * Register the recursive provider on `ctx.skills`, the settings namespace, the
+ * management HTTP channel, and the MCP manager.
  *
  * The provider is registered into the calling context's layer, so mounting this
  * row from the host composition publishes it globally while mounting it from an
@@ -546,6 +664,9 @@ function resolveConfig(raw) {
  *
  * @param {import('@deepseek-ai/cordis').Context} ctx
  * @param {object} entryConfig - the row's `config` block, used as the settings base layer.
+ * @returns {object} the live pieces (provider, state builder, applyOps, http, mcp).
+ *   Cordis ignores a plugin's return value, so this changes nothing about
+ *   mounting; it lets tests drive the real pipeline instead of a look-alike.
  */
 export function apply(ctx, entryConfig = {}) {
   const base = resolveConfig(entryConfig)
@@ -575,6 +696,42 @@ export function apply(ctx, entryConfig = {}) {
 
   const provider = new NestedSkillProvider(ctx, { config: currentConfig })
   let watcher
+  /** The registry registration's control handle; `invalidate` is mandatory after a toggle. */
+  let control
+  /** The live settings provider, when this deployment has one. */
+  let settingsService
+
+  /** True only when a writable settings provider can persist a change. */
+  function isWritable() {
+    return settingsService !== undefined && settingsService.writable === true
+  }
+
+  /** The effective write-access mode, defaulted when no settings provider exists. */
+  function readWriteAccess() {
+    const configured = currentConfig().writeAccess
+    return configured === WRITE_ACCESS.LOOPBACK ? WRITE_ACCESS.LOOPBACK : WRITE_ACCESS.SAME_ORIGIN
+  }
+
+  /** The live disable table. */
+  function readDisabled() {
+    return readToggles(currentConfig())
+  }
+
+  /**
+   * Push the disable table into the provider and drop the registry's cached
+   * catalog.
+   *
+   * WITHOUT THE INVALIDATE THE TOGGLE APPEARS TO DO NOTHING: `SkillRegistry`
+   * memoises collected catalogs per revision, so a changed `list()` alone is
+   * invisible until the registration invalidates. This is the single place that
+   * happens, so no toggle path can forget it.
+   */
+  function syncToggles() {
+    const config = currentConfig()
+    provider.suppressor.providerName = config.providerName
+    provider.suppressor.set(readDisabled())
+    control?.invalidate()
+  }
 
   /** Re-derive the watch set and refresh the catalog after a config change. */
   function syncWatcher() {
@@ -584,11 +741,13 @@ export function apply(ctx, entryConfig = {}) {
     watcher.refresh()
   }
 
+  // ── settings namespace ────────────────────────────────────────────────────
   // The settings namespace layers over the composition row: `installSection`
   // registers the row's config as the base and falls back to it if the settings
   // provider detaches, so this plugin works with or without `ctx.settings`.
   ctx.inject(['settings'], (settingsCtx) => {
-    settingsCtx.settings.installSection(ctx, SETTINGS_NAMESPACE, Config, base, {
+    settingsService = settingsCtx.settings ?? settingsCtx.get?.('settings')
+    settingsService.installSection(ctx, SETTINGS_NAMESPACE, Config, base, {
       validate: (value) => {
         if (!DUPLICATE_POLICIES.includes(value.duplicatePolicy)) {
           throw new Error(`skill-nesting: duplicatePolicy must be one of ${DUPLICATE_POLICIES.join(', ')}`)
@@ -598,15 +757,21 @@ export function apply(ctx, entryConfig = {}) {
       setSource: (nextSource) => {
         source = nextSource
         syncWatcher()
+        syncToggles()
       },
-      onChange: syncWatcher,
+      onChange: () => {
+        syncWatcher()
+        syncToggles()
+      },
     })
   })
 
-  ctx.skills.registerProvider((control) => {
+  // ── the skill provider ────────────────────────────────────────────────────
+  ctx.skills.registerProvider((registration) => {
+    control = registration
     const config = currentConfig()
     if (config.watch && watcher === undefined) {
-      watcher = new RootWatcher(ctx, control.invalidate, {
+      watcher = new RootWatcher(ctx, registration.invalidate, {
         roots: config.roots,
         debounceMs: config.watchDebounceMs,
       })
@@ -614,6 +779,10 @@ export function apply(ctx, entryConfig = {}) {
     }
     return provider
   })
+
+  // A disable table already present in the composition config must be live
+  // before the first catalog read.
+  syncToggles()
 
   ctx.effect(() => () => {
     watcher?.dispose()
@@ -631,6 +800,271 @@ export function apply(ctx, entryConfig = {}) {
     if (currentConfig().roots.some((root) => path === root || path.startsWith(`${root}/`))) watcher.refresh()
   })
 
+  // ── MCP inventory manager (owned by lib/mcp.js) ───────────────────────────
+  // The factory is called through a fence so a failure there degrades the MCP
+  // section instead of taking skill management down with it (N6).
+  let mcpManager
+  try {
+    mcpManager = createMcpManager({
+      ctx,
+      readDeclared: () => {
+        const declared = currentConfig().mcpServers
+        return Array.isArray(declared) ? declared : []
+      },
+      writeDeclared: (next) => writeSettings([{ op: 'set', path: ['mcpServers'], value: next }]),
+      readConfig: currentConfig,
+      log: (message) => ctx.logger.info(message),
+    })
+  } catch (error) {
+    ctx.logger.warn(`skill-nesting: the MCP manager could not be created: ${String(error)}`)
+  }
+  const fallbackInventory = { servers: [], managerAvailable: false, mcpClientAvailable: false }
+  async function readMcp() {
+    if (mcpManager === undefined) return fallbackInventory
+    try {
+      return await mcpManager.describe()
+    } catch (error) {
+      ctx.logger.warn(`skill-nesting: reading the MCP inventory failed: ${String(error)}`)
+      return fallbackInventory
+    }
+  }
+
+  ctx.effect(() => () => {
+    try {
+      mcpManager?.dispose()
+    } catch {}
+  }, 'skill-nesting mcp manager')
+
+  // ─ state + HTTP channel ──────────────────────────────────────────────────
+  const state = createStateBuilder({
+    ctx,
+    provider,
+    readConfig: currentConfig,
+    readDisabled,
+    readMcp,
+    readWriteAccess,
+    isWritable,
+    log: (message) => ctx.logger.warn(message),
+  })
+
+  /**
+   * Persist settings ops through the live provider.
+   * @param {object[]} ops - path ops for the `settings.mutate` contract.
+   */
+  async function writeSettings(ops) {
+    await settingsService.mutate(SETTINGS_NAMESPACE, ops)
+  }
+
+  /** Read back one name and describe whether a disable really took effect. */
+  async function verifyOne(name, enabled) {
+    if (enabled) {
+      const catalog = await readCatalog(ctx, undefined)
+      return verifyEnabled({ catalog, name, providerName: currentConfig().providerName })
+    }
+    const verdicts = await verifyDisabled({
+      ctx,
+      names: [name],
+      providerName: currentConfig().providerName,
+    })
+    return verdicts.get(name) ?? { effective: false, shadowedBy: 'another-provider', provider: null, present: false }
+  }
+
+  /** Apply one skill enable/disable operation, verifying the outcome by read-back. */
+  async function applySkillToggle(op) {
+    const kind = OP.SKILL_TOGGLE
+    const name = typeof op?.name === 'string' && op.name !== ''
+      ? op.name
+      : typeof op?.target === 'string' && op.target !== '' ? op.target : undefined
+    if (name === undefined) {
+      return refusal(kind, 'Refused: "name" must be a non-empty skill name.')
+    }
+    if (typeof op?.enabled !== 'boolean') {
+      return refusal(kind, `Refused: "enabled" must be true or false for "${name}".`, name)
+    }
+    if (!isWritable()) {
+      return refusal(kind, 'Refused: no writable settings provider is present, so a toggle could not be persisted.', name)
+    }
+
+    const plan = planToggle(readDisabled(), name, op.enabled)
+    if (!plan.changed) {
+      const verdict = await verifyOne(name, op.enabled)
+      return {
+        kind,
+        ok: true,
+        status: STATUS.UNCHANGED,
+        detail: describeVerdict(name, op.enabled, verdict, false),
+        target: name,
+      }
+    }
+
+    await writeSettings([plan.op])
+    state.invalidate()
+    const verdict = await verifyOne(name, op.enabled)
+    // The write landed; whether the OUTCOME landed is a separate question and
+    // is answered only by the read-back. A disable that a nearer layer defeats
+    // reports ok:false with a detail that says so in plain words.
+    const achieved = op.enabled ? verdict.ok === true : verdict.effective === true
+    return {
+      kind,
+      ok: achieved,
+      status: STATUS.APPLIED,
+      detail: describeVerdict(name, op.enabled, verdict, true),
+      target: name,
+    }
+  }
+
+  /** Apply a bulk skill operation as ONE settings write (F3.5). */
+  async function applySkillBulk(op) {
+    const rows = []
+    if (Array.isArray(op?.skills)) {
+      for (const item of op.skills) {
+        if (item !== null && typeof item === 'object' && typeof item.name === 'string') {
+          rows.push({ name: item.name, enabled: item.enabled === true })
+        }
+      }
+    } else if (Array.isArray(op?.names)) {
+      for (const item of op.names) {
+        if (typeof item === 'string' && item !== '') rows.push({ name: item, enabled: op.enabled === true })
+      }
+    }
+    if (rows.length === 0) {
+      return [refusal(OP.SKILL_BULK, 'Refused: supply "skills" ([{name, enabled}]) or "names" with "enabled".')]
+    }
+    if (!isWritable()) {
+      return rows.map((row) => refusal(OP.SKILL_BULK, 'Refused: no writable settings provider is present, so toggles could not be persisted.', row.name))
+    }
+
+    const disabled = readDisabled()
+    const plans = []
+    const results = []
+    for (const row of rows) {
+      const plan = planToggle(disabled, row.name, row.enabled)
+      if (!plan.changed) {
+        results.push({ row, plan, skipped: true })
+        continue
+      }
+      plans.push(plan.op)
+      results.push({ row, plan, skipped: false })
+    }
+
+    if (plans.length > 0) {
+      await writeSettings(plans)
+      state.invalidate()
+    }
+
+    // Verify EVERY row, including the skipped ones. A row that was already in
+    // the requested state still has to be reported from the read-back: skipping
+    // it would leave the verdict undefined and the detail would claim the skill
+    // is "still served by another-provider" when it is in fact already off.
+    const hostCatalog = await readCatalog(ctx, undefined)
+    const disableNames = results.filter((entry) => entry.row.enabled === false).map((entry) => entry.row.name)
+    const verdicts = disableNames.length > 0
+      ? await verifyDisabled({ ctx, names: disableNames, providerName: currentConfig().providerName, hostCatalog })
+      : new Map()
+
+    return results.map(({ row, skipped }) => {
+      const verdict = row.enabled
+        ? verifyEnabled({ catalog: hostCatalog, name: row.name, providerName: currentConfig().providerName })
+        : verdicts.get(row.name) ?? { effective: false, shadowedBy: null, provider: null, present: false }
+      const achieved = row.enabled ? verdict.ok === true : verdict.effective === true
+      return {
+        kind: OP.SKILL_BULK,
+        ok: skipped ? true : achieved,
+        status: skipped ? STATUS.UNCHANGED : STATUS.APPLIED,
+        detail: describeVerdict(row.name, row.enabled, verdict, !skipped),
+        target: row.name,
+      }
+    })
+  }
+
+  /** Validate and persist one baseline configuration field (F7). */
+  async function applyConfigSet(op) {
+    const kind = OP.CONFIG_SET
+    const key = Array.isArray(op?.path) ? op.path[0] : op?.key
+    const value = op?.value
+    if (typeof key !== 'string' || key === '') return refusal(kind, 'Refused: "path" or "key" must name a configuration field.')
+    if (key === 'skills' || key === 'mcpServers') {
+      return refusal(kind, `Refused: "${key}" is managed through its own operations, not config.set.`, key)
+    }
+    if (!Object.hasOwn(Config.dict ?? {}, key) && !(key in base)) {
+      return refusal(kind, `Refused: "${key}" is not a configurable field.`, key)
+    }
+    if (!isWritable()) return refusal(kind, 'Refused: no writable settings provider is present.', key)
+
+    let candidate
+    try {
+      candidate = resolveConfig({ ...currentConfig(), [key]: value })
+    } catch (error) {
+      return refusal(kind, `Refused: ${String(error.message ?? error)}`, key)
+    }
+    if (key === 'roots') candidate = { ...candidate, roots: normaliseRoots(candidate.roots) }
+    if (JSON.stringify(candidate[key]) === JSON.stringify(currentConfig()[key])) {
+      return { kind, ok: true, status: STATUS.UNCHANGED, detail: `"${key}" already has that value.`, target: key }
+    }
+
+    await writeSettings([{ op: 'set', path: [key], value: key === 'roots' ? candidate.roots : candidate[key] }])
+    state.invalidate()
+    return { kind, ok: true, status: STATUS.APPLIED, detail: `"${key}" is now in force; discovery re-reads it immediately.`, target: key }
+  }
+
+  /** Remove a baseline override so the row default applies again. */
+  async function applyConfigUnset(op) {
+    const kind = OP.CONFIG_UNSET
+    const key = Array.isArray(op?.path) ? op.path[0] : op?.key
+    if (typeof key !== 'string' || key === '') return refusal(kind, 'Refused: "path" or "key" must name a configuration field.')
+    if (key === 'skills' || key === 'mcpServers') {
+      return refusal(kind, `Refused: "${key}" is managed through its own operations.`, key)
+    }
+    if (!isWritable()) return refusal(kind, 'Refused: no writable settings provider is present.', key)
+    await writeSettings([{ op: 'unset', path: [key] }])
+    state.invalidate()
+    return { kind, ok: true, status: STATUS.APPLIED, detail: `"${key}" was reset to the row default.`, target: key }
+  }
+
+  /**
+   * Apply a batch of operations, one result each, in order.
+   * @param {object[]} ops - operations carrying a `kind` from {@link OP}.
+   * @returns {Promise<object[]>} {@link import('./contract.js').ApplyResult} values.
+   */
+  async function applyOps(ops) {
+    const results = []
+    for (const op of Array.isArray(ops) ? ops : []) {
+      const kind = op?.kind
+      try {
+        if (kind === OP.SKILL_TOGGLE) {
+          results.push(await applySkillToggle(op))
+        } else if (kind === OP.SKILL_BULK) {
+          results.push(...await applySkillBulk(op))
+        } else if (kind === OP.CONFIG_SET) {
+          results.push(await applyConfigSet(op))
+        } else if (kind === OP.CONFIG_UNSET) {
+          results.push(await applyConfigUnset(op))
+        } else if (MCP_KINDS.has(kind)) {
+          if (mcpManager === undefined) {
+            results.push(refusal(kind, 'Refused: the MCP manager is unavailable in this host.'))
+          } else {
+            results.push(await mcpManager.apply(op))
+          }
+        } else {
+          results.push(refusal(kind, `Unknown operation kind ${JSON.stringify(kind)}.`))
+        }
+      } catch (error) {
+        results.push(refusal(kind, `The operation failed: ${String(error.message ?? error)}`, op?.name ?? op?.target))
+      }
+    }
+    return results
+  }
+
+  const http = createHttpRoutes({
+    ctx,
+    buildState: () => state.build(),
+    applyOps,
+    readWriteAccess,
+    isWritable,
+    log: (message) => ctx.logger.info(message),
+  })
+
+  // ── start-up diagnostics ──────────────────────────────────────────────────
   const initial = currentConfig()
   if (initial.roots.length === 0) {
     ctx.logger.warn('skill-nesting: no roots configured; the row is mounted but contributes nothing')
@@ -638,5 +1072,20 @@ export function apply(ctx, entryConfig = {}) {
     ctx.logger.info(
       `skill-nesting: provider "${initial.providerName}" watching ${initial.roots.length} root(s) at depth ${initial.maxDepth}: ${initial.roots.join(', ')}`,
     )
+  }
+
+  // Cordis ignores a plugin's return value; exposing the live pieces costs
+  // nothing and lets a test drive the REAL apply pipeline and state builder
+  // instead of re-assembling an equivalent one that could drift from it.
+  return {
+    provider,
+    state,
+    http,
+    mcp: mcpManager,
+    applyOps,
+    readWriteAccess,
+    isWritable,
+    readMcp,
+    currentConfig,
   }
 }

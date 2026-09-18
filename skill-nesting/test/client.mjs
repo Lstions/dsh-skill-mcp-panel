@@ -260,7 +260,7 @@ function mountCard(initialValue, options = {}) {
   runtime.reset()
   const harness = makeScope(initialValue, options)
   const locale = makeLocale()
-  const captured = { component: undefined, registration: undefined }
+  const captured = { component: undefined, registration: undefined, registrations: [] }
 
   // Capture the props the registration passes, by rendering through a wrapper
   // that records them. The wrapper is what the slot would render, so the card
@@ -271,12 +271,21 @@ function mountCard(initialValue, options = {}) {
     return captured.component(props)
   }
 
+  // The plugin now registers TWO slots: the settings card under
+  // `settings.plugin.item` and the management page under `settings.plugins.tab`.
+  // This harness captures the card by slot NAME rather than by registration
+  // order, so adding another slot can never silently retarget these assertions
+  // at the wrong component.
+  const CARD_SLOT = "settings.plugin.item"
   client.apply({
     slots: {
       inject: (_key, callback) => callback(),
       register: (registration, component) => {
-        captured.registration = registration
-        captured.component = component
+        if (registration.name === CARD_SLOT) {
+          captured.registration = registration
+          captured.component = component
+        }
+        captured.registrations.push(registration)
         return () => {}
       },
     },
@@ -287,6 +296,7 @@ function mountCard(initialValue, options = {}) {
       return typeof disposer === 'function' ? disposer : () => {}
     },
   })
+  if (captured.component === undefined) throw new Error(`the bundle registered no component for slot "${CARD_SLOT}"`)
 
   let tree
   const rerender = () => {
