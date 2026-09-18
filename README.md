@@ -47,8 +47,10 @@ The package root **is** the plugin, and it declares `dsh.bundle.patch`, so one
 command installs *and* activates it:
 
 ```sh
+# Local checkout (the primary flow, verified end to end)
 dsh plugin --profile web add /absolute/path/to/this/repo
-# then restart the profile
+
+# Then restart the profile.
 ```
 
 That works because the launcher reconciles installed dependencies against
@@ -65,25 +67,58 @@ Verify what happened:
 cat ~/.dsh/profiles/web/package.json
 ```
 
+### Installing from a git URL
+
+`dsh plugin add` forwards its arguments to pnpm, so any spec pnpm accepts works —
+**except the ssh shorthand**, which the CLI misparses:
+
+| Spec | Result |
+|---|---|
+| `/abs/path` | works — installs and auto-selects the bundle |
+| `https://github.com/<owner>/<repo>.git` | pnpm clones it; needs credentials/network |
+| `git@github.com:<owner>/<repo>.git` | **broken in `dsh`** — see below |
+
+With the ssh shorthand the argument is split on `@`, so the package is recorded
+under a dependency literally named `git`, and the next boot fails with
+`cannot resolve profile bundle "git"`. That is a `dsh` CLI bug, not a property of
+this package — it reproduces with any repository. Use the HTTPS form or a local
+path instead, and if you hit it, remove the bogus dependency:
+
+```sh
+dsh plugin --profile web remove git
+```
+
 ### The default row carries neutral values
 
 `cordis.patch.yml` inserts one row with **no roots configured**. Root paths are
 site-specific, so they belong to the machine that mounts the plugin — set them
-in the profile's own `cordis.patch.yml` (applied after every bundle layer, so it
-wins), or at runtime in **Settings → Plugins**, which needs no restart:
+in the profile's own `cordis.patch.yml`, which is applied after every bundle
+layer and therefore wins:
 
 ```yaml
-- insert:
-    - id: skill-mcp-panel
-      name: 'dsh-skill-mcp-panel'
-      config:
-        roots:
-          - ~/.agents/skills
-          - ~/.hermes/skills
-          - ~/.dsh/skills
-        maxDepth: 4
-        duplicatePolicy: first-wins
+# The bundle's row has id `skill-mcp-panel`. A patch REPLACES a row's whole
+# config rather than merging, so restate every key.
+- id: skill-mcp-panel
+  config:
+    providerName: nested-filesystem
+    roots:
+      - ~/.agents/skills
+      - ~/.hermes/skills
+      - ~/.dsh/skills
+    maxDepth: 4
+    rank: 300
+    includeHidden: false
+    includeFlatRootFiles: true
+    watch: true
+    watchDebounceMs: 250
+    duplicatePolicy: first-wins
+    writeAccess: same-origin
+    skills: {}
+    mcpServers: []
 ```
+
+Runtime edits in **Settings → Plugins → Skills & MCP** need no restart and layer
+over both.
 
 ### The restart matters
 
