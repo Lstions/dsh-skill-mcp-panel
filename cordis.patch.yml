@@ -1,0 +1,44 @@
+# The dsh-skill-mcp-panel bundle patch: one insert declaring this plugin's row.
+#
+# Installing the package is enough to activate it. The launcher reconciles
+# installed dependencies against `dsh.profile.bundles` and auto-selects any
+# dependency that declares a bundle (`reconcileProfilePlugins` in dsh-app-boot),
+# so this one command both installs and enables the plugin:
+#
+#   dsh plugin --profile <name> add /absolute/path/to/this/repo
+#
+# A dependency WITHOUT a bundle patch is reported as a plain dependency and
+# contributes no rows, which is exactly why this file and the `dsh.bundle.patch`
+# field pointing at it both have to exist.
+#
+# A patch REPLACES a targeted row's whole `config` rather than merging into it,
+# and the profile's own cordis.patch.yml is applied after every bundle layer. So
+# this file carries only neutral, publishable defaults: site-specific roots
+# belong to the machine that mounts it, in the profile patch, which wins here.
+
+- insert:
+    - id: skill-mcp-panel
+      name: 'dsh-skill-mcp-panel'
+      config:
+        providerName: nested-filesystem
+        # Empty by default. Set roots in the profile patch (or at runtime in
+        # Settings → Plugins); with no roots the row mounts and contributes
+        # nothing rather than scanning an arbitrary directory.
+        roots: []
+        maxDepth: 4
+        # Lower wins within one layer. 300 sits above the built-in root ranks
+        # (400 user-dsh / 500 user-agents), so this provider wins a name it
+        # discovers by walking deeper than the built-in one-level scan.
+        rank: 300
+        includeHidden: false
+        includeFlatRootFiles: true
+        watch: true
+        watchDebounceMs: 250
+        # first-wins: the first root keeps a contested name (default, safest).
+        # error: the name is withheld entirely, so no caller acts on the wrong file.
+        duplicatePolicy: first-wins
+        # same-origin: writes need a matching Origin plus a JSON content type.
+        # loopback: additionally require a loopback socket.
+        writeAccess: same-origin
+        skills: {}
+        mcpServers: []

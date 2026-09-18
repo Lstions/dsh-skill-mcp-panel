@@ -1,5 +1,5 @@
 /**
- * Offline test for the skill-nesting settings CARD.
+ * Offline test for the skill-mcp-panel settings CARD.
  *
  * Loads the real `lib/client.js` browser bundle under a minimal React, locale,
  * and slot harness, then drives the rendered component. This is the only way to
@@ -168,7 +168,7 @@ const requireFn = (id) => {
 new Function('window', 'document', 'require', source)(globalThis.window, globalThis.document, requireFn)
 const client = registered.factory(requireFn)
 
-check('bundle registers under the package id', registered.id, 'dsh-skill-nesting')
+check('bundle registers under the package id', registered.id, 'dsh-skill-mcp-panel')
 check('client inject declares slots, locale and settingsScope', client.inject, ['slots', 'locale', 'settingsScope'])
 check('bundle injects exactly one stylesheet', styleTags.length, 1)
 check('stylesheet carries both zh and en independent CSS once', styleTags[0].textContent.includes('.skn_card'), true)
@@ -361,12 +361,12 @@ const BASE_VALUE = {
 // ── 3. Chinese locale is registered and resolved ───────────────────────────
 {
   const card = mountCard(BASE_VALUE)
-  const dicts = card.locale.dictionaries.get('skill-nesting')
+  const dicts = card.locale.dictionaries.get('skill-mcp-panel')
   check('registers both zh and en dictionaries', Object.keys(dicts).sort(), ['en', 'zh'])
   check('zh dictionary has the title', dicts.zh.title, '分层技能发现')
   check('en dictionary has the title', dicts.en.title, 'Skill nesting')
   check('zh covers every en key', Object.keys(dicts.en).every((key) => typeof dicts.zh[key] === 'string'), true)
-  check('registration declares the locale namespace', card.registrationLocale, 'skill-nesting')
+  check('registration declares the locale namespace', card.registrationLocale, 'skill-mcp-panel')
 
   // Switch the active locale and confirm the rendered copy follows.
   card.locale.setActive('zh')
@@ -422,7 +422,7 @@ await (async () => {
 {
   const card = mountCard(BASE_VALUE)
   card.open()
-  const depth = inputs(card.tree, 'text').find((n) => n.props.id === 'skill-nesting-maxDepth')
+  const depth = inputs(card.tree, 'text').find((n) => n.props.id === 'skill-mcp-panel-maxDepth')
   depth.props.onChange({ target: { value: '99' } })
   card.rerender()
   const save = buttons(card.tree).find((b) => b.props.children === 'Save')
@@ -431,7 +431,7 @@ await (async () => {
 
   const empty = mountCard(BASE_VALUE)
   empty.open()
-  inputs(empty.tree, 'text').find((n) => n.props.id === 'skill-nesting-providerName').props.onChange({ target: { value: '  ' } })
+  inputs(empty.tree, 'text').find((n) => n.props.id === 'skill-mcp-panel-providerName').props.onChange({ target: { value: '  ' } })
   empty.rerender()
   check('empty provider name disables Save', buttons(empty.tree).find((b) => b.props.children === 'Save').props.disabled, true)
 }
@@ -503,7 +503,7 @@ await (async () => {
   card.harness.setValue({ ...BASE_VALUE, roots: ['/srv/skills'], maxDepth: 6 }, 99)
   card.rerender()
   check('an edited field keeps the user draft', textarea(card.tree).props.value, '/tmp/scratch')
-  const depth = inputs(card.tree, 'text').find((n) => n.props.id === 'skill-nesting-maxDepth')
+  const depth = inputs(card.tree, 'text').find((n) => n.props.id === 'skill-mcp-panel-maxDepth')
   check('an untouched field follows the new Host value', depth.props.value, '6')
   check('the surviving draft still counts as pending', buttons(card.tree).find((b) => b.props.children === 'Save').props.disabled, false)
 }

@@ -1,8 +1,8 @@
 {
-  "name": "dsh-skill-nesting",
+  "name": "dsh-skill-mcp-panel",
   "version": "1.2.0",
   "private": true,
-  "description": "Recursive, multi-root skill provider with per-skill switches, conflict reporting and MCP management for the DeepSeek Harness",
+  "description": "Recursive, multi-root skill discovery with per-skill switches, duplicate-name reporting and MCP server management for the DeepSeek Harness",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -12,9 +12,13 @@
     "./client": {
       "default": "./lib/client.js"
     },
+    "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },
   "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
     "client": {
       "platform": "web",
       "inject": [
@@ -25,6 +29,7 @@
   },
   "files": [
     "lib",
+    "cordis.patch.yml",
     "README.md"
   ],
   "scripts": {

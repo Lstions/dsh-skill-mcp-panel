@@ -10,7 +10,7 @@
  * assertions read a live registry, which is the only way to prove that
  * add/remove changes what the model can actually call.
  */
-import { Context, Service } from '../../../skill-nesting/node_modules/@deepseek-ai/cordis/lib/index.js'
+import { Context, Service } from '../../../node_modules/@deepseek-ai/cordis/lib/index.js'
 import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
 import { existsSync, readdirSync } from 'node:fs'

@@ -50,7 +50,7 @@ async function boot(roots, extra = {}) {
   let handle
   await ctx.plugin(
     {
-      name: 'skill-nesting-host',
+      name: 'skill-mcp-panel-host',
       inject: ['skills'],
       apply: (pluginCtx) => {
         pluginCtx.provide('settings', settings.settings)
@@ -276,7 +276,7 @@ const modelNames = async (booted) =>
   let handle
   await ctx.plugin(
     {
-      name: 'skill-nesting-host',
+      name: 'skill-mcp-panel-host',
       inject: ['skills'],
       apply: (pluginCtx) => {
         // NO settings service at all: the host can read but not persist.

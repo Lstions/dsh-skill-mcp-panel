@@ -26,7 +26,7 @@
  * requires a non-zero status: without that, a suite that fails to register any
  * route would report "everything correctly rejected" while testing nothing.
  */
-import { SECRET_MASK } from '../../../skill-nesting/lib/contract.js'
+import { SECRET_MASK } from '../../../lib/contract.js'
 import { loadHttp, loadState, loadMcp } from '../lib/plugin-under-test.mjs'
 import { makeRequest, createWebServerHarness } from '../lib/http-harness.mjs'
 
@@ -85,8 +85,8 @@ export async function run(report) {
 
   // The factory mounts through ctx.inject(['webServer']); resolve whatever it
   // registered so the assertions below run against real handlers.
-  const stateHandler = server.handlers['/skill-nesting/state']
-  const applyHandler = server.handlers['/skill-nesting/apply']
+  const stateHandler = server.handlers['/skill-mcp-panel/state']
+  const applyHandler = server.handlers['/skill-mcp-panel/apply']
   report.observe('registered paths', Object.keys(server.handlers))
   report.assert('the state route registered', typeof stateHandler === 'function', `paths=${JSON.stringify(Object.keys(server.handlers))}`)
   report.assert('the apply route registered', typeof applyHandler === 'function', `paths=${JSON.stringify(Object.keys(server.handlers))}`)

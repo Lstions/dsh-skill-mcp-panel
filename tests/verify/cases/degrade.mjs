@@ -20,7 +20,7 @@ export const meta = { id: 'degrade', requirement: 'N6', title: 'missing optional
 export async function run(report) {
   const stateAvailable = hasModule('state.js')
   if (!stateAvailable) {
-    report.blocked('N6: skill-nesting/lib/state.js does not exist yet, so there is no state document to degrade')
+    report.blocked('N6: skill-mcp-panel/lib/state.js does not exist yet, so there is no state document to degrade')
   }
 
   const stateModule = await loadState(report)

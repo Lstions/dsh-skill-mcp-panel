@@ -28,7 +28,7 @@ const SAMPLES = 60
 export const meta = { id: 'perf', requirement: 'N5', title: 'state endpoint P95 under real scale' }
 
 export async function run(report) {
-  if (!hasModule('state.js')) report.blocked('N5: skill-nesting/lib/state.js does not exist yet')
+  if (!hasModule('state.js')) report.blocked('N5: skill-mcp-panel/lib/state.js does not exist yet')
 
   // Preferred measurement: the real HTTP handler, because that is what N5 names.
   if (hasModule('http.js')) {
@@ -90,7 +90,7 @@ async function measureOverHttp(report) {
       isWritable: () => true,
     })
 
-    const handler = server.handlerFor('/skill-nesting/state') ?? server.handlers[Object.keys(server.handlers)[0]]
+    const handler = server.handlerFor('/skill-mcp-panel/state') ?? server.handlers[Object.keys(server.handlers)[0]]
     if (handler === undefined) {
       report.observe('state handler', 'not registered — falling back to the builder')
       return undefined
@@ -124,7 +124,7 @@ async function measureOverHttp(report) {
       const elapsedMs = Number(process.hrtime.bigint() - start) / 1e6
       if (index >= WARMUP) timings.push(Number(elapsedMs.toFixed(2)))
     }
-    summarise(report, timings, 'GET /skill-nesting/state (real handler)')
+    summarise(report, timings, 'GET /skill-mcp-panel/state (real handler)')
     return true
   } finally {
     await dispose()

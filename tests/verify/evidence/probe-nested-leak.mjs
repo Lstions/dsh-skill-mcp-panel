@@ -1,6 +1,6 @@
-const { createMcpManager } = await import('/home/sun/workspace/dsh-plugins/skill-nesting/lib/mcp.js')
-const { createStateBuilder, maskDeep } = await import('/home/sun/workspace/dsh-plugins/skill-nesting/lib/state.js')
-const { maskDict } = await import('/home/sun/workspace/dsh-plugins/skill-nesting/lib/contract.js')
+const { createMcpManager } = await import('/home/sun/workspace/dsh-plugins/lib/mcp.js')
+const { createStateBuilder, maskDeep } = await import('/home/sun/workspace/dsh-plugins/lib/state.js')
+const { maskDict } = await import('/home/sun/workspace/dsh-plugins/lib/contract.js')
 const CANARY = 'CANARY-NESTED-SECRET-XYZ'
 
 console.log('=== maskDeep vs maskDict on a NESTED config (devA\'s reported leak shape) ===')

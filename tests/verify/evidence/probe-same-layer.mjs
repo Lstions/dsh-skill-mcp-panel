@@ -22,7 +22,7 @@ const cand = (name, provider, rank, inv) => ({name, description:'d', invocation:
 
 console.log('SCENARIO: TWO SAME-LAYER PROVIDERS both offer "x"')
 console.log('  competitor (built-in skill-filesystem analogue) rank=400')
-console.log('  skill-nesting rank=0 or omit')
+console.log('  skill-mcp-panel rank=0 or omit')
 console.log()
 
 let mode = 'inert'

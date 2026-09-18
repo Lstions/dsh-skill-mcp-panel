@@ -83,7 +83,7 @@ export async function run(report) {
   //
   // This machine yields "24 categories" under two DIFFERENT conventions that
   // happen to share a cardinality but do NOT contain the same members:
-  //   (a) immediate-parent basename, the algorithm in skill-nesting/test/realtree.mjs
+  //   (a) immediate-parent basename, the algorithm in skill-mcp-panel/test/realtree.mjs
   //       -> buckets depth-1 skills under a pseudo-category "skills", and
   //          collapses mlops/{evaluation,inference,models,research} into four
   //          standalone names that lose their "mlops" prefix

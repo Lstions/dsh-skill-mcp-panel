@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Run every skill-nesting test in one pass and exit non-zero on any failure.
+ * Run every skill-mcp-panel test in one pass and exit non-zero on any failure.
  *
  * Usage: node test/all.mjs
  *
@@ -17,9 +17,17 @@ import { dirname, join } from 'node:path'
 import { existsSync } from 'node:fs'
 
 const here = dirname(fileURLToPath(import.meta.url))
-const repo = join(here, '..', '..')
+// The package now IS the repository root, so `test/` is one level below it and
+// the repository root is `here/..`. (It used to be `here/../..` when the package
+// lived in a `skill-nesting/` subdirectory; that extra hop silently pointed the
+// independent suite at a nonexistent path.)
+const repo = join(here, '..')
 
 const suites = [
+  // Structural gate first: every module reference and manifest entry point must
+  // resolve. This runs before anything else because a broken path makes every
+  // later suite fail in a way that looks like a product bug.
+  { name: 'package structure (references, manifest, bundle patch)', file: join(repo, 'tests', 'verify', 'check-refs.mjs') },
   { name: 'provider (discovery, dedupe, policy, config)', file: join(here, 'run.js') },
   { name: 'watcher (invalidation, re-watch)', file: join(here, 'watch.mjs') },
   { name: 'settings card (render, diff, write)', file: join(here, 'client.mjs') },

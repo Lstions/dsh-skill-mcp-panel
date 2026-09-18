@@ -258,7 +258,7 @@ function makeFetch(state, options = {}) {
   const calls = []
   const fetchImpl = async (input, init) => {
     calls.push({ input, init })
-    if (input === '/skill-nesting/state') {
+    if (input === '/skill-mcp-panel/state') {
       if (options.readFails === true) return { ok: false, status: 500, json: async () => ({}) }
       return { ok: true, status: 200, json: async () => state }
     }
@@ -439,9 +439,9 @@ function makeLocale(active = 'en') {
 {
   const page = await mountPage(makeState())
   check('registers the page in settings.plugins.tab', page.registration.name, 'settings.plugins.tab')
-  check('the tab id is the settings namespace', page.registration.id, 'skill-nesting')
+  check('the tab id is the settings namespace', page.registration.id, 'skill-mcp-panel')
   check('the tab carries a localized label', typeof page.registration.label, 'function')
-  check('the tab declares its locale namespace', page.registration.locale, 'skill-nesting')
+  check('the tab declares its locale namespace', page.registration.locale, 'skill-mcp-panel')
   check('the settings card is still registered too', page.registrations.some((r) => r.name === 'settings.plugin.item'), true)
   check('exactly two slots are claimed', page.registrations.length, 2)
 }
@@ -484,7 +484,7 @@ function makeLocale(active = 'en') {
   check('the alpha switch is present', alpha !== undefined, true)
   alpha.props.onChange()
   await page.settle()
-  const posted = page.fetchImpl.calls.find((c) => c.input === '/skill-nesting/apply')
+  const posted = page.fetchImpl.calls.find((c) => c.input === '/skill-mcp-panel/apply')
   check('N3 toggle: a write was actually sent', posted !== undefined, true)
   check('N3 toggle: it carried a skill.toggle op', JSON.parse(posted.init.body).ops[0].kind, 'skill.toggle')
   check('N3 toggle: it used the same-origin JSON content type', posted.init.headers['content-type'], 'application/json')
@@ -606,7 +606,7 @@ function makeLocale(active = 'en') {
   await page.settle()
   inputs(page.tree).filter((n) => n.props.role === 'switch').find((n) => n.props['aria-label'].includes('alpha')).props.onChange()
   await page.settle()
-  const writes = page.fetchImpl.calls.filter((c) => c.input === '/skill-nesting/apply')
+  const writes = page.fetchImpl.calls.filter((c) => c.input === '/skill-mcp-panel/apply')
   check('a 409 is retried once against a fresh revision', writes.length, 2)
   check('the retry used a newer revision', JSON.parse(writes[1].init.body).revision > JSON.parse(writes[0].init.body).revision, true)
 }
@@ -655,7 +655,7 @@ function makeLocale(active = 'en') {
       return () => {}
     },
   })
-  const table = locale.dicts.get('skill-nesting')
+  const table = locale.dicts.get('skill-mcp-panel')
   check('both locales are registered', table !== undefined && table.zh !== undefined && table.en !== undefined, true)
   const zhKeys = Object.keys(table.zh).sort()
   const enKeys = Object.keys(table.en).sort()

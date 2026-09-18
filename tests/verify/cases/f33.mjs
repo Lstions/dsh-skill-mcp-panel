@@ -4,7 +4,7 @@
  * THE MECHANIC, measured against the real registry
  * (evidence/probe-preset-depth1.mjs, probe-near-layer.mjs):
  *   - `skill-filesystem` mounted by a preset registers into THAT PRESET'S layer.
- *   - A GLOBAL-layer provider — where skill-nesting lives — cannot shadow it,
+ *   - A GLOBAL-layer provider — where skill-mcp-panel lives — cannot shadow it,
  *     and rank does not help: the nearer layer wins outright. Measured: a
  *     global rank-100 suppression candidate LOSES to a preset rank-500 provider.
  *   - Measured on this machine: the preset's depth-1 filesystem provider finds

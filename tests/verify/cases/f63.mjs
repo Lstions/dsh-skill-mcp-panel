@@ -22,11 +22,13 @@
  * package cannot be resolved reports BLOCKED — an unrunnable environment is not
  * evidence about the product.
  */
-import { createMcpManager } from '../../../skill-nesting/lib/mcp.js'
+import { createMcpManager } from '../../../lib/mcp.js'
 import { makeHost, MCP_CLIENT_MODULE } from '../lib/mcp-host.mjs'
 import { loadMcp } from '../lib/plugin-under-test.mjs'
+import { fileURLToPath } from 'node:url'
 
-const FIXTURE = '/home/sun/workspace/dsh-plugins/skill-nesting/test/mcp-fixture-server.mjs'
+// Derived from this file's location, so the suite is not bound to one machine.
+const FIXTURE = fileURLToPath(new URL('../../../test/mcp-fixture-server.mjs', import.meta.url))
 
 export const meta = { id: 'f63', requirement: 'F6.3', title: 'a dead MCP server is never reported applied; a live one really registers tools' }
 

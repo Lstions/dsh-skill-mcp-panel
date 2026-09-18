@@ -29,7 +29,7 @@ console.log('import line now:', lines[importIdx].trim())
 writeFileSync(target, lines.join('\n'))
 console.log('mutated call site ->', mutatedLine.trim())
 
-const { createStateBuilder } = await import('./lib/state.js')
+const { createStateBuilder } = await import('../../../lib/state.js')
 const CANARY = 'CANARY-NESTED-MUTATION'
 const nested = { transport:'stdio', env:{ GITHUB_TOKEN: CANARY, DEEP:{ INNER_TOKEN: CANARY } } }
 const built = createStateBuilder({

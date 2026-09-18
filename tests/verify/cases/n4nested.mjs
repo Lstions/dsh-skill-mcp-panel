@@ -18,8 +18,8 @@
  * The two helpers are also contrasted directly (`maskDict` vs `maskDeep`), so
  * the case documents WHY the deeper version exists rather than only that it does.
  */
-import { SECRET_MASK } from '../../../skill-nesting/lib/contract.js'
-import { maskDict } from '../../../skill-nesting/lib/contract.js'
+import { SECRET_MASK } from '../../../lib/contract.js'
+import { maskDict } from '../../../lib/contract.js'
 import { loadHttp, loadState, loadMcp } from '../lib/plugin-under-test.mjs'
 import { makeRequest, createWebServerHarness } from '../lib/http-harness.mjs'
 
@@ -116,7 +116,7 @@ export async function run(report) {
     isWritable: () => true,
   })
 
-  const handler = server.handlers['/skill-nesting/state']
+  const handler = server.handlers['/skill-mcp-panel/state']
   report.assert('the state route registered', typeof handler === 'function', JSON.stringify(Object.keys(server.handlers)))
   if (typeof handler !== 'function') report.blocked('N4: no state route, so the wire cannot be inspected')
 

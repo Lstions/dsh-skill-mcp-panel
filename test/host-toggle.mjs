@@ -71,7 +71,7 @@ async function boot(config = {}) {
   }
   await ctx.plugin(
     {
-      name: 'skill-nesting-host',
+      name: 'skill-mcp-panel-host',
       inject: ['skills'],
       apply: (pluginCtx) => {
         pluginCtx.provide('settings', settings.settings)
@@ -307,8 +307,8 @@ async function toggle(booted, name, enabled) {
   check('suppressor emits one candidate per disabled name, sorted', candidates.map((c) => c.name), ['a-skill', 'b-skill'])
   check('suppressor rank wins the same-layer competition', candidates.every((c) => c.rank === SUPPRESS_RANK), true)
   check('suppressor candidates are model- and user-invisible', candidates.map((c) => c.invocation), [INVOCATION_OFF, INVOCATION_OFF])
-  check('suppressor reuses the real description', candidates[0].description, 'Disabled in skill-nesting: Real A.')
-  check('suppressor invents a description for an unknown name', candidates[1].description, 'Disabled in skill-nesting.')
+  check('suppressor reuses the real description', candidates[0].description, 'Disabled in skill-mcp-panel: Real A.')
+  check('suppressor invents a description for an unknown name', candidates[1].description, 'Disabled in skill-mcp-panel.')
   check('suppressor keeps the real path for display', candidates[0].path, '/a/SKILL.md')
   checkTrue('suppressor knows what it omits', suppressor.omits({ name: 'a-skill' }))
 

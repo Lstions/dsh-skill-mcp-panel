@@ -229,7 +229,7 @@ async function runF36Gate(modulePath, report) {
       return { passed: false, reason: 'load-error', detail: error.message, before: before.md5, after: null }
     }
 
-    const { makeFsService, makeCtx } = await import('../../../skill-nesting/test/harness.mjs')
+    const { makeFsService, makeCtx } = await import('../../../test/harness.mjs')
     const harness = makeCtx(makeFsService())
     try {
       module.apply(harness.ctx, { roots: [tree.root] })
@@ -276,7 +276,7 @@ async function runF36Gate(modulePath, report) {
  */
 async function runNestedLeakProbe() {
   const CANARY = 'CANARY-MUTATION-PROBE'
-  const module = await import(`../../../skill-nesting/lib/state.js?probe=${Date.now()}`)
+  const module = await import(`../../../lib/state.js?probe=${Date.now()}`)
   const builder = module.createStateBuilder({
     ctx: { get: () => undefined, logger: { info() {}, warn() {}, error() {} }, effect: () => () => {}, on: () => () => {}, inject: () => {} },
     provider: { name: 'p', lastReport: { roots: [], errors: [] } },

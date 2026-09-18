@@ -3,11 +3,11 @@
  * SHIPPED discovery code rather than a reimplementation of it.
  *
  * `lib/index.js` is a Cordis plugin whose `apply()` needs a context. The repo's
- * own test harness (`skill-nesting/test/harness.mjs`) already provides a
+ * own test harness (`skill-mcp-panel/test/harness.mjs`) already provides a
  * minimal one that captures the registered provider; this reuses that contract
  * instead of inventing a second, divergent fake.
  */
-import { makeFsService, makeCtx } from '../../../skill-nesting/test/harness.mjs'
+import { makeFsService, makeCtx } from '../../../test/harness.mjs'
 
 /**
  * Run the real provider over the given roots.
@@ -15,7 +15,7 @@ import { makeFsService, makeCtx } from '../../../skill-nesting/test/harness.mjs'
  */
 export async function runRealProvider(roots, config, report) {
   const harness = makeCtx(makeFsService())
-  const { apply } = await import('../../../skill-nesting/lib/index.js')
+  const { apply } = await import('../../../lib/index.js')
   apply(harness.ctx, { roots, ...config })
 
   const captured = harness.captured
@@ -63,8 +63,8 @@ export async function runRealProvider(roots, config, report) {
  * @returns {Promise<{provider: object, ctx: object, root: string, cleanup: Function}>}
  */
 export async function bootShippedPlugin(report, skillNames, disabled = []) {
-  const { makeFsService, makeCtx } = await import('../../../skill-nesting/test/harness.mjs')
-  const { apply } = await import('../../../skill-nesting/lib/index.js')
+  const { makeFsService, makeCtx } = await import('../../../test/harness.mjs')
+  const { apply } = await import('../../../lib/index.js')
   const { writeTempSkillTree, removeTree } = await import('./fs-probe.mjs')
 
   const tree = writeTempSkillTree(skillNames.map((name) => ({ name, body: `ORIGINAL BODY of ${name}` })))

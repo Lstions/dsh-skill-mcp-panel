@@ -1,6 +1,6 @@
 # 界面文案表（zh / en）
 
-> 供 `lib/client.js` 直接落地为 `ctx.locale.register("skill-nesting", { zh, en })`。
+> 供 `lib/client.js` 直接落地为 `ctx.locale.register("skill-mcp-panel", { zh, en })`。
 >
 > **两个字典的键集合完全一致**：各 **110** 个键（本文件末尾有计数校验证）。
 > 键名用点分层级；`{name}` / `{provider}` / `{count}` / `{reason}` 是插值占位，

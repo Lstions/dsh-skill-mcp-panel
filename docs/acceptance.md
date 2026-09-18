@@ -1,4 +1,4 @@
-# 验收矩阵 · dsh-skill-nesting
+# 验收矩阵 · dsh-skill-mcp-panel
 
 > 维护者：**qa-verify**（task-5）。最终结论由 testB（task-6）在本文件末尾追加。
 > 采集时刻：**2026-09-18**。所有数字都在本文件里给出**分母 + 口径 + 可复跑命令**。
@@ -18,7 +18,7 @@ node tests/verify/run.mjs --list       # 列出用例与对应需求编号
 node tests/verify/run.mjs --json       # 机器可读汇总
 
 # 全量门禁（开发自测 + 独立验收）
-cd skill-nesting && node test/all.mjs  # 任一套件红 → 整体 exit 1
+cd skill-mcp-panel && node test/all.mjs  # 任一套件红 → 整体 exit 1
 ```
 
 **三种结果，没有第四种**：`PASS` / `FAIL` / `BLOCKED`。
@@ -167,7 +167,7 @@ devA 在 `lib/state.js` 引入递归 `maskDeep` 修正。我**独立验证**：
 - `maskDict` 对嵌套形状**确实泄漏**（`n4nested` 断言这一点，防止有人误删 `maskDeep`）；
 - `maskDeep` 在深度 1/2/3 全部掩码，且**保留非密钥字段**（否则配置面板就废了）；
 - **端到端**：声明 → `createMcpManager.describe()` → `createStateBuilder.build()` →
-  `GET /skill-nesting/state` 的**原始响应文本里搜不到 canary**（子串搜索，不是结构遍历 ——
+  `GET /skill-mcp-panel/state` 的**原始响应文本里搜不到 canary**（子串搜索，不是结构遍历 ——
   结构断言会漏掉它忘记访问的那一层）。
 
 **一个如实记录的中间面**：`mcpManager.describe()` 自身对**深度 ≥2** 的密钥仍会泄漏
@@ -180,14 +180,14 @@ devA 在 `lib/state.js` 引入递归 `maskDeep` 修正。我**独立验证**：
 **这是本任务唯一的真实宿主验证，不是我跑的**，故单列并注明来源：进程已终止、端口已释放、settings 残留已移除。
 
 ```
-GET /skill-nesting/state                 -> HTTP 200
+GET /skill-mcp-panel/state                 -> HTTP 200
   version 1 | revision 2 | writable true | writeAccess same-origin
   roots 3 | skills 135 | conflicts 1
   mcp.servers 0 | managerAvailable true | mcpClientAvailable true
   errors: ["root /home/sun/.dsh/skills: not a directory"]   (该目录确实不存在，ls 已核实)
   conflicts: ["github"]
 
-POST /skill-nesting/apply {revision:2, ops:[{kind:'skill.toggle', name:'api-endpoint-verification', enabled:false}]}
+POST /skill-mcp-panel/apply {revision:2, ops:[{kind:'skill.toggle', name:'api-endpoint-verification', enabled:false}]}
   -> HTTP 200 | status applied
   row: enabled=false, effective=true, modelInvocable=false, userInvocable=false,
        provider=nested-filesystem, rank=0
@@ -282,7 +282,7 @@ POST /skill-nesting/apply {revision:2, ops:[{kind:'skill.toggle', name:'api-endp
 2. **本文档的结构已按你的需求分区**：矩阵区（§2）/ 通过区（§3）/ 未通过区（§4）/ 未覆盖区（§5）。
    请把最终结论追加到 §7，**不要重写上面各节**（它们是过程证据）。
 3. **活体验证**是最大缺口，也是最可能发现真问题的部分：
-   - 起 3199+ 实例（**绝不碰 3080**），`GET /skill-nesting/state` 结构性断言；
+   - 起 3199+ 实例（**绝不碰 3080**），`GET /skill-mcp-panel/state` 结构性断言；
    - 真实 HTTP 执行一次技能开关，复读 state 与 `ctx.skills` 视角是否一致；
    - 断言启动日志无报错，完成后**清理进程**。
 4. **本套件的 BLOCKED 语义**：BLOCKED = 功能未落地，**不是通过**。若你看到 BLOCKED，先确认开发是否已完成，
@@ -321,14 +321,14 @@ POST /skill-nesting/apply {revision:2, ops:[{kind:'skill.toggle', name:'api-endp
 
 | # | 项 | 我跑的命令 | 原始结果 |
 |---|---|---|---|
-| 1 | 全量门禁 | `cd skill-nesting && npm test` | **exit 0**、`ALL SUITES PASSED`、`SUMMARY suites=6 failed=0 blocked=0` |
+| 1 | 全量门禁 | `cd skill-mcp-panel && npm test` | **exit 0**、`ALL SUITES PASSED`、`SUMMARY suites=6 failed=0 blocked=0` |
 | 2 | 既有 4 套件不退化 | `node test/run.js` / `watch.mjs` / `client.mjs` | **36/36**、**7/7**、**52/52** |
 | 3 | 独立验收套件 | `node tests/verify/run.mjs` | `12 passed, 1 failed, 0 blocked (of 13)`、`107/108 断言` |
-| 4 | 真实规模（带分母口径） | `node skill-nesting/test/realtree.mjs` | **135 唯一技能 / 24 分类 / 1 冲突(github)**；raw `SKILL.md`=164；口径见 §1 |
+| 4 | 真实规模（带分母口径） | `node skill-mcp-panel/test/realtree.mjs` | **135 唯一技能 / 24 分类 / 1 冲突(github)**；raw `SKILL.md`=164；口径见 §1 |
 | 5 | 变异自证（F3.6 门禁） | `node tests/verify/run.mjs mutation` | 改坏→**红**(`reason=content-changed`)→恢复后 md5/size/mtime **三者与基线全等** |
-| 6 | **活体：state 端点** | `GET http://127.0.0.1:3211/skill-nesting/state` | **HTTP 200**；`version=1 revision=1 writable=true writeAccess=same-origin`；`MISSING KEYS: []`（contract 的 version/roots/skills/conflicts/mcp/config 全在） |
+| 6 | **活体：state 端点** | `GET http://127.0.0.1:3211/skill-mcp-panel/state` | **HTTP 200**；`version=1 revision=1 writable=true writeAccess=same-origin`；`MISSING KEYS: []`（contract 的 version/roots/skills/conflicts/mcp/config 全在） |
 | 7 | **活体：启动日志无报错** | `grep -cE 'error\|Error\|ERR_' live-3211.log` | **0 行**；日志仅一行 `dsh web: http://127.0.0.1:3211/?token=…` |
-| 8 | **活体：真实 HTTP 技能开关** | `POST /skill-nesting/apply`（同源 `Origin` + `application/json`） | **HTTP 200**、`{"ok":true,"status":"applied"}`；随后 GET state 该行为 `enabled:false, modelInvocable:false, userInvocable:false, provider:"nested-filesystem", rank:0` |
+| 8 | **活体：真实 HTTP 技能开关** | `POST /skill-mcp-panel/apply`（同源 `Origin` + `application/json`） | **HTTP 200**、`{"ok":true,"status":"applied"}`；随后 GET state 该行为 `enabled:false, modelInvocable:false, userInvocable:false, provider:"nested-filesystem", rank:0` |
 | 9 | **活体：关技能不动文件（F3.6）** | 开关前后 `md5sum` + `stat -c %y` | md5 `b169f8658683a47165c83ff5f084d2a4` **一致**；mtime `2026-05-11 15:58:07` **一致** |
 | 10 | **活体：F3.4 跨真实重启持久** | 关 → `kill` 进程 → 重启 → 读 state | 重启后仍 `enabled=false effective=true`；开启后恢复 `enabled=true` |
 | 11 | **活体：N4 写门禁** | 跨源 Origin / 非 JSON content-type | **403 / 403**（`status:"refused"`）；同源 JSON **200**（对照组，证明门禁有分辨力） |
@@ -341,7 +341,7 @@ POST /skill-nesting/apply {revision:2, ops:[{kind:'skill.toggle', name:'api-endp
 
 口径补注（避免误读）：
 - §1 的「24 分类」是**口径 (a) 直接父目录名**；口径 (b) 相对根完整路径为 **34**，两者都对，已在 §1 写明。
-- `npm test` 必须在 **`skill-nesting/` 目录**下跑才会命中该插件脚本。**仓库根没有 `package.json`**，
+- `npm test` 必须在 **`skill-mcp-panel/` 目录**下跑才会命中该插件脚本。**仓库根没有 `package.json`**，
   在根目录跑会落到 `sun@1.0.0` 并 `Error: no test specified`（exit 1）——**调用姿势问题，非产品缺陷**。
 
 ### 7.2 未通过区（滚动：3 条 → **2 条**）
@@ -418,13 +418,13 @@ global 层关不掉，本应报 `effective=false`。
 以 md5 与穷尽搜索为证（结论时刻 `fd67472010f539750373656be9876a29`）：
 
 ```
-$ grep -rn "settings.plugins.tab" skill-nesting/lib/     -> (NOT PRESENT in any lib file)
+$ grep -rn "settings.plugins.tab" skill-mcp-panel/lib/     -> (NOT PRESENT in any lib file)
 $ grep -rln "plugins.tab" . | grep -v node_modules       -> (none anywhere)
-$ grep -cE "fetch\(|/skill-nesting/state|/skill-nesting/apply" skill-nesting/lib/client.js -> 0
-$ grep -nE "slots\.register" skill-nesting/lib/client.js
+$ grep -cE "fetch\(|/skill-mcp-panel/state|/skill-mcp-panel/apply" skill-mcp-panel/lib/client.js -> 0
+$ grep -nE "slots\.register" skill-mcp-panel/lib/client.js
   718:  ctx.slots.register({ name: "settings.plugin.item", key: NS, locale: NS }, (props) =>
-$ ls skill-nesting/test/ui-*.mjs                          -> No such file or directory
-$ node skill-nesting/test/client.mjs                      -> 52/52（与改动前完全一致，无新增用例）
+$ ls skill-mcp-panel/test/ui-*.mjs                          -> No such file or directory
+$ node skill-mcp-panel/test/client.mjs                      -> 52/52（与改动前完全一致，无新增用例）
 ```
 
 **含义**：task-4 要求的四分区管理页、`settings.plugins.tab` 挂载点、HTTP 数据通道（`fetch` 契约端点）、
@@ -467,8 +467,8 @@ client 侧仍然**只有**改动前那张 `settings.plugin.item` 设置卡（依
 
 活体验证会写真实 settings，我用**测试用技能 `minecraft-modpack-server`**（nested，depth 2）做开关：
 
-- 改动键：`~/.dsh/settings.yaml` → `skill-nesting.skills.<name>: true`（关闭）/ 删除该键（开启）。
-- **已还原**：最终 `skill-nesting.skills` 为空表，之后该键整体从 `settings.yaml` 消失（回到基线形状）。
+- 改动键：`~/.dsh/settings.yaml` → `skill-mcp-panel.skills.<name>: true`（关闭）/ 删除该键（开启）。
+- **已还原**：最终 `skill-mcp-panel.skills` 为空表，之后该键整体从 `settings.yaml` 消失（回到基线形状）。
 - 另在多次试验中临时关闭过 `api-endpoint-verification`、`gnome-remote-desktop`、`yuanbao`、`cpp-test-coverage-analysis`，**均已还原为开启**。
 - **所有被开关技能文件的 md5/mtime 全程未变**（逐次比对，见 §7.1 第 9 条）。
 - 结束状态：`GET /state` → `total:135, disabled:0`。**3080 全程未被触碰**；我方端口（3199/3211）**已释放**。
@@ -486,12 +486,12 @@ client 侧仍然**只有**改动前那张 `settings.plugin.item` 设置卡（依
 | 复验项 | 结果 |
 |---|---|
 | `node tests/verify/run.mjs` | `12 passed, 1 failed, 0 blocked (of 13)`、**111/112** 断言（唯一红仍是 `f3cache`） |
-| `cd skill-nesting && npm test` | `SUMMARY suites=10 failed=1 blocked=0`（套件已从 6 增至 10），**唯一红仍是 `f3cache`** |
+| `cd skill-mcp-panel && npm test` | `SUMMARY suites=10 failed=1 blocked=0`（套件已从 6 增至 10），**唯一红仍是 `f3cache`** |
 | 活体（新起 3213）：`GET /state` | **HTTP 200**，`version=1 ... skills=135 conflicts=1`，`mcp.servers=0` |
 | 活体启动日志 | **NO ERROR LINES MATCHED** |
 | 活体开关 + md5 | disable `{"ok":true,"status":"applied"}` → `enabled:false,effective:true,modelInvocable:false`；md5 前后均 `b169f8658683a47165c83ff5f084d2a4`（**未变**）；恢复后 `disabled:0`、md5 仍一致 |
 | 清理 | 3213 **已释放**；**3080 仍由 pid 3368002 持有，全程未动** |
-| settings 归位 | `skill-nesting.skills: {}` |
+| settings 归位 | `skill-mcp-panel.skills: {}` |
 
 **因此 §7.0 的计数（17 通过 / 2 未通过 / 5 未覆盖）在最新代码上依然成立。**
 
@@ -530,7 +530,7 @@ devC 在 45+ 分钟内零产出，Lead 于 14:xx 中断它并亲自实现：
 ### 8.4 最终门禁（Lead 亲跑）
 
 ```
-$ cd skill-nesting && npm test
+$ cd skill-mcp-panel && npm test
 verify: 13 passed, 0 failed, 0 blocked (of 13)
 verify: 114/114 individual assertions passed
 ALL SUITES PASSED
@@ -540,11 +540,11 @@ SUMMARY suites=11 failed=0 blocked=0 skipped=0     EXIT=0
 ### 8.5 活体验证（Lead，端口 3215，已清理）
 
 ```
-GET /skill-nesting/state            -> HTTP 200；version=1 skills=135 conflicts=1 mcp.servers=0 roots=3
+GET /skill-mcp-panel/state            -> HTTP 200；version=1 skills=135 conflicts=1 mcp.servers=0 roots=3
 启动日志                            -> 0 条 error
-boot graph 含 dsh-skill-nesting/client.js
+boot graph 含 dsh-skill-mcp-panel/client.js
 取回该 combo（HTTP 200, 5,185,625 bytes）:
-  "settings.plugins.tab" 出现 13 次 · "/skill-nesting/state" 出现 · "技能与 MCP" 出现
+  "settings.plugins.tab" 出现 13 次 · "/skill-mcp-panel/state" 出现 · "技能与 MCP" 出现
 => 管理页面确实随宿主 bundle 送达浏览器（非仅单测层）
 技能开关（真实 HTTP，同源 + JSON） -> status:"applied"
   row: enabled=false effective=true modelInvocable=false provider=nested-filesystem rank=0

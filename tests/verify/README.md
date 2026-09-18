@@ -20,7 +20,7 @@ node tests/verify/run.mjs f31 f33          # only named cases
 node tests/verify/run.mjs --list           # names only
 ```
 
-Exit code is non-zero if any case fails. `skill-nesting/test/all.mjs` runs this
+Exit code is non-zero if any case fails. `test/all.mjs` runs this
 whole suite as its last group, so `npm test` covers it.
 
 ## Case index

@@ -1,5 +1,5 @@
 /**
- * Shared offline harness for dsh-skill-nesting tests.
+ * Shared offline harness for dsh-skill-mcp-panel tests.
  *
  * `targetKey` is the realpath, which is exactly the identity contract the local
  * `ctx.fs` backend provides. That is what lets the tests prove symlinked and

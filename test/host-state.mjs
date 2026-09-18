@@ -69,7 +69,7 @@ async function bootAndBuild(config, mcp) {
   let builder
   await ctx.plugin(
     {
-      name: 'skill-nesting-host',
+      name: 'skill-mcp-panel-host',
       inject: ['skills'],
       apply: (pluginCtx) => {
         pluginCtx.provide('settings', settings.settings)
@@ -409,7 +409,7 @@ async function bootAndBuild(config, mcp) {
   let handle
   await ctx.plugin(
     {
-      name: 'skill-nesting-host',
+      name: 'skill-mcp-panel-host',
       inject: ['skills'],
       apply: (pluginCtx) => {
         pluginCtx.provide('settings', settings.settings)

@@ -23,8 +23,10 @@ import { fileURLToPath } from 'node:url'
 import { Blocked } from './assert.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
+// The plugin package IS the repository root: this file lives at
+// <repo>/tests/verify/lib/, so three hops up is the repo, and `lib/` is direct.
 const REPO = join(HERE, '..', '..', '..')
-const LIB = join(REPO, 'skill-nesting', 'lib')
+const LIB = join(REPO, 'lib')
 
 function libPath(name) {
   return join(LIB, name)
@@ -39,7 +41,7 @@ export function hasModule(name) {
 export async function loadLib(name, requirement) {
   const path = libPath(name)
   if (!existsSync(path)) {
-    throw new Blocked(`${requirement}: skill-nesting/lib/${name} does not exist yet (dev work in flight)`)
+    throw new Blocked(`${requirement}: skill-mcp-panel/lib/${name} does not exist yet (dev work in flight)`)
   }
   const module = await import(path)
   return module

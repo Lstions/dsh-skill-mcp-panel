@@ -13,7 +13,7 @@ const ctx = new ctxMod.Context()
 ctx.plugin(skill.default ?? skill)
 await new Promise(r=>setTimeout(r,60))
 
-// GLOBAL layer: our plugin, scanning nested at maxDepth 4 (this is skill-nesting)
+// GLOBAL layer: our plugin, scanning nested at maxDepth 4 (this is skill-mcp-panel)
 const suppressed = new Set()
 let control
 ctx.skills.registerProvider((c) => { control = c; return {

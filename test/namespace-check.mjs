@@ -102,7 +102,7 @@ await ctx.plugin(FileSettingsProvider, { filename: '/tmp/dsh-nesting-namespace-c
 //     non-function as an effect callback, failing with "Invalid effect".
 await ctx.plugin(
   {
-    name: 'skill-nesting',
+    name: 'skill-mcp-panel',
     inject: ['skills'],
     apply: (c) => {
       skillNestingApply(c, { roots: ['/tmp'], watch: false })

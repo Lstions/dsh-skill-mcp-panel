@@ -180,7 +180,7 @@ export function makeSettingsStub(base) {
       hooks.onChange()
     },
     get: () => resolved,
-    describe: () => [{ ns: 'skill-nesting', value: resolved, revision, user, base }],
+    describe: () => [{ ns: 'skill-mcp-panel', value: resolved, revision, user, base }],
     /** The real write path the plugin uses; `update`/`replace` are not needed here. */
     mutate: async (_ns, ops) => {
       applyWrite(ops)
