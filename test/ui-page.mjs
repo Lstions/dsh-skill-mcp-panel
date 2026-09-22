@@ -324,6 +324,8 @@ async function mountPage(state, options = {}) {
   runtime.reset()
   const registrations = []
   let captured
+  /** 插件详情页（plugins.detail.section）注册的组件，单独保留以便渲染验证。 */
+  let detail
 
   const scopeReads = []
   const inertScope = new Proxy(
@@ -340,17 +342,27 @@ async function mountPage(state, options = {}) {
     },
   )
 
+  // 保留 locale，让详情页测试能用同一份真实字典渲染。
+  const locale = makeLocale()
+
   client.apply({
     slots: {
       inject: (_key, callback) => callback(),
       register: (registration, component) => {
         registrations.push(registration)
         if (registration.name === 'settings.plugins.tab') captured = { registration, component }
+        // ALSO keep the plugin-detail component. It renders through a different
+        // closure than the tab, so a crash inside it — a ReferenceError, say — is
+        // INVISIBLE to every tab-based assertion: the host only reports
+        // "slot entry crashed in 'plugins.detail.section'" in the browser
+        // console. That is exactly how a broken detail page once shipped with a
+        // green suite, so the detail component gets its own render check below.
+        if (registration.name === 'plugins.detail.section') detail = { registration, component }
         return () => {}
       },
     },
     settingsScope: { bind: () => inertScope },
-    locale: makeLocale().ctx,
+    locale: locale.ctx,
     effect: (callback) => {
       const disposer = callback()
       return typeof disposer === 'function' ? disposer : () => {}
@@ -385,6 +397,8 @@ async function mountPage(state, options = {}) {
   return {
     registrations,
     registration: captured.registration,
+    detail,
+    locale,
     // What the bundle DECLARES it needs. A service named here that the host does
     // not provide keeps the whole entry pending, so this is asserted directly.
     inject: client.inject ?? [],
@@ -458,12 +472,25 @@ function makeLocale(active = 'en') {
   check('the tab id is the settings namespace', page.registration.id, 'skill-mcp-panel')
   check('the tab carries a localized label', typeof page.registration.label, 'function')
   check('the tab declares its locale namespace', page.registration.locale, 'skill-mcp-panel')
-  // The page is the ONLY surface. An earlier version also claimed
-  // `settings.plugin.item`, but that slot was removed in 0.1.7 along with the
-  // `settingsScope` service that fed it, so a claim on it is inert. This asserts
-  // the current single-surface contract and would fail if someone reintroduced a
-  // registration into a slot nothing offers.
-  check('exactly one slot is claimed (the page)', page.registrations.length, 1)
+  // Two surfaces, both real slots the 0.1.7 host provides (verified against
+  // Slots.listSubTree, not assumed):
+  //   plugins.detail.section   the page a user reaches from
+  //                            Home → Plugins → Installed → this plugin, which
+  //                            is where the screenshot-driven report came from
+  //   settings.plugins.tab     the entry inside Settings → Plugins
+  // An earlier version also claimed `settings.plugin.item`, which 0.1.7 removed;
+  // a claim on a slot nothing offers is inert, so that must stay absent.
+  check('exactly two slots are claimed', page.registrations.length, 2)
+  check(
+    'the plugin detail section is claimed (the Plugins page entry)',
+    page.registrations.some((r) => r.name === 'plugins.detail.section'),
+    true,
+  )
+  check(
+    'the settings tab is claimed (the Settings entry)',
+    page.registrations.some((r) => r.name === 'settings.plugins.tab'),
+    true,
+  )
   check('no registration targets the removed settings.plugin.item slot', page.registrations.some((r) => r.name === 'settings.plugin.item'), false)
   // Requiring a service the host no longer provides leaves the entire entry
   // unactivated ("waiting for service"), which is a silent, total failure.
@@ -813,6 +840,143 @@ function makeLocale(active = 'en') {
   const depth = inputs(page.tree).find((node) => node.props.id === 'skill-mcp-panel-page-maxDepth')
   check('a non-writable deployment disables the field', depth.props.disabled, true)
   check('a non-writable deployment says so', allText(page.tree).includes('read-only'), true)
+}
+
+// ─ 18. MCP 可以新增：表单存在，且提交发出 mcp.add ────────────────────────
+// 这一节守的是一个真实缺口：主机端 lib/mcp.js 早就实现了 mcp.add /
+// mcp.configure / mcp.remove，客户端却一个都没发过 —— 页面只能切换已有服务器，
+// 既不能新增也不能修改。用户报的就是这个。
+{
+  const page = await mountPage(makeState({ mcp: { servers: [], managerAvailable: true, mcpClientAvailable: true } }))
+  const add = buttons(page.tree).find((n) => textOf(n) === 'Add server')
+  check('an Add server control is offered', add !== undefined, true)
+  add.props.onClick()
+  await page.settle()
+
+  check('the new-server form reveals a name field', inputs(page.tree).some((n) => n.props.id === 'skill-mcp-panel-mcp-new-name'), true)
+  check('the new-server form reveals a transport select', selects(page.tree).some((n) => n.props.id === 'skill-mcp-panel-mcp-new-transport'), true)
+  check('the new-server form reveals a command field (stdio default)', inputs(page.tree).some((n) => n.props.id === 'skill-mcp-panel-mcp-new-command'), true)
+
+  // 名字必填：空名字时提交按钮必须禁用，否则会发出一个主机端必然拒绝的请求。
+  const submitEmpty = buttons(page.tree).find((n) => textOf(n) === 'Add' && n.props.disabled !== undefined)
+  check('Add is disabled while the name is empty', submitEmpty?.props.disabled, true)
+
+  const name = inputs(page.tree).find((n) => n.props.id === 'skill-mcp-panel-mcp-new-name')
+  name.props.onChange({ target: { value: 'fixture' } })
+  await page.settle()
+  const command = inputs(page.tree).find((n) => n.props.id === 'skill-mcp-panel-mcp-new-command')
+  command.props.onChange({ target: { value: 'node' } })
+  await page.settle()
+  const add2 = buttons(page.tree).find((n) => textOf(n) === 'Add' && n.props.disabled === false)
+  check('Add becomes available once the name is filled', add2 !== undefined, true)
+  add2.props.onClick()
+  await page.settle()
+
+  const posted = page.fetchImpl.calls.filter((c) => c.input === '/skill-mcp-panel/apply').pop()
+  check('adding a server writes through the apply route', posted !== undefined, true)
+  const body = JSON.parse(posted.init.body)
+  check('the write carries an mcp.add op', body.ops[0].kind, 'mcp.add')
+  check('the op names the new server', body.ops[0].serverName, 'fixture')
+  check('the op carries the transport', body.ops[0].config.transport, 'stdio')
+  check('the op carries the command', body.ops[0].config.command, 'node')
+}
+
+// ─ 19. MCP 可以修改：行内编辑发出 mcp.configure ──────────────────────────
+{
+  const page = await mountPage(makeState())
+  const expand = buttons(page.tree).find((n) => textOf(n) === 'Expand group')
+  check('a server row can be expanded', expand !== undefined, true)
+  expand.props.onClick()
+  await page.settle()
+  const edit = buttons(page.tree).find((n) => textOf(n) === 'Edit')
+  check('an Edit control is offered on a declared server', edit !== undefined, true)
+  edit.props.onClick()
+  await page.settle()
+  const command = inputs(page.tree).find((n) => n.props.id === 'skill-mcp-panel-mcp-github-command')
+  check('the edit form is prefilled from the stored config', command?.props.value, '')
+  command.props.onChange({ target: { value: 'node2' } })
+  await page.settle()
+  const save = buttons(page.tree).find((n) => textOf(n) === 'Save')
+  save.props.onClick()
+  await page.settle()
+  const posted = page.fetchImpl.calls.filter((c) => c.input === '/skill-mcp-panel/apply').pop()
+  const body = JSON.parse(posted.init.body)
+  check('editing writes an mcp.configure op', body.ops[0].kind, 'mcp.configure')
+  check('the edit carries the typed command', body.ops[0].config.command, 'node2')
+}
+
+// ─ 20. MCP 可以删除，且外部层的服务器不可改 ──────────────────────────────
+{
+  const page = await mountPage(makeState())
+  const expand = buttons(page.tree).find((n) => textOf(n) === 'Expand group')
+  expand.props.onClick()
+  await page.settle()
+  const remove = buttons(page.tree).find((n) => textOf(n) === 'Remove')
+  check('a Remove control is offered on a declared server', remove !== undefined, true)
+  remove.props.onClick()
+  await page.settle()
+  const posted = page.fetchImpl.calls.filter((c) => c.input === '/skill-mcp-panel/apply').pop()
+  check('removing writes an mcp.remove op', JSON.parse(posted.init.body).ops[0].kind, 'mcp.remove')
+
+  // 外层声明的服务器只有开关，没有编辑/删除：它不在本插件的配置层里。
+  const external = await mountPage(
+    makeState({
+      mcp: {
+        servers: [{ serverName: 'outer', transport: 'stdio', target: 'x', enabled: true, declared: false, addressable: true, toolCount: 0, tools: [], phase: null, readOnlyReason: null, editable: false, config: {} }],
+        managerAvailable: true,
+        mcpClientAvailable: true,
+      },
+    }),
+  )
+  const expandOuter = buttons(external.tree).find((n) => textOf(n) === 'Expand group')
+  expandOuter.props.onClick()
+  await external.settle()
+  check('an outer-layer server offers no Remove', buttons(external.tree).some((n) => textOf(n) === 'Remove'), false)
+  check('an outer-layer server says why it is immutable', allText(external.tree).includes('outer layer'), true)
+}
+
+// ─ 21. 插件详情页的组件必须能真正渲染 ─────────────────────────────────────
+// 这是本轮真正漏掉的覆盖。用户从「主页 → Plugins → Installed → 本插件」进入的
+// 是 plugins.detail.section，它由**另一个注册闭包**渲染。那个组件里出现
+// ReferenceError 时：模块照样激活、设置页标签照样正常，只有详情页空白，
+// 宿主只在浏览器控制台留下 "slot entry crashed in 'plugins.detail.section'"。
+// 所以必须把这个组件单独渲染一次，任何渲染期异常都会在这里变成红色。
+{
+  const page = await mountPage(makeState())
+  check('the plugin detail component was captured', page.detail !== undefined, true)
+  check('the detail registration targets plugins.detail.section', page.detail?.registration?.name, 'plugins.detail.section')
+
+  // 用真实字典而不是恒等函数：文案来自 t()，恒等函数下页面渲染出来全是 key，
+  // 断言搜 'Skill & MCP management' 会假失败。
+  // 用 mountPage 已经注册过字典的 locale。
+  const detailT = page.locale.ctx.bind('skill-mcp-panel')
+  const render = (subject) =>
+    runtime.renderRoot(runtime.React.createElement(page.detail.component, { t: detailT, subject }))
+
+  // bundle 详情页：{kind:'bundle', pkg:{name}} —— 用户截图那个页面。
+  let tree
+  let thrown
+  try {
+    tree = render({ kind: 'bundle', pkg: { name: 'dsh-skill-mcp-panel', rows: [] } })
+  } catch (problem) {
+    thrown = problem
+  }
+  check('the detail component renders without throwing', thrown === undefined, true)
+  if (thrown !== undefined) console.log('      threw: ' + String(thrown?.message ?? thrown))
+  check('the detail render shows the management section', allText(tree).includes('Skill & MCP management'), true)
+
+  // 别的插件的详情页不能被我们占位。
+  check('another package detail page renders nothing from this plugin', render({ kind: 'bundle', pkg: { name: '@deepseek-ai/dsh-base', rows: [] } }), null)
+  // 官方插件详情页的 subject 形状不同：{kind:'item', id}。
+  check('an official plugin detail page renders nothing from this plugin', render({ kind: 'item', id: 'some-official-plugin' }), null)
+  // row 详情页（{kind:'row', pkg, row}）属于本包时必须渲染。
+  check(
+    "this plugin's row detail page renders the management section",
+    allText(render({ kind: 'row', pkg: { name: 'dsh-skill-mcp-panel' }, row: { rowId: 'skill-mcp-panel' } })).includes('Skill & MCP management'),
+    true,
+  )
+  // 没有 subject（某些宿主路径不传）时也不能崩，按本插件处理。
+  check('a detail render without a subject does not throw', allText(render(undefined)).includes('Skill & MCP management'), true)
 }
 
 await flush()

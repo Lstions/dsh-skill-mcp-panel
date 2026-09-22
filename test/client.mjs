@@ -120,12 +120,22 @@ client.apply({
   },
 })
 
-check('exactly one slot is claimed', registrations.length, 1)
-check('the claimed slot is the Plugins tab', registrations[0]?.name, 'settings.plugins.tab')
+check('exactly two slots are claimed', registrations.length, 2)
+check(
+  'the plugin detail section is claimed (Home → Plugins → Installed)',
+  registrations.some((r) => r.name === 'plugins.detail.section'),
+  true,
+)
+check(
+  'the settings tab is claimed (Settings → Plugins)',
+  registrations.some((r) => r.name === 'settings.plugins.tab'),
+  true,
+)
 checkFalse('no registration targets the removed settings.plugin.item slot', registrations.some((r) => r.name === 'settings.plugin.item'))
-check('the tab id is the settings namespace', registrations[0]?.id, 'skill-mcp-panel')
-checkTrue('the tab supplies a localized label', typeof registrations[0]?.label === 'function')
-check('the tab declares its locale namespace', registrations[0]?.locale, 'skill-mcp-panel')
+const tab = registrations.find((r) => r.name === 'settings.plugins.tab')
+check('the tab id is the settings namespace', tab?.id, 'skill-mcp-panel')
+checkTrue('the tab supplies a localized label', typeof tab?.label === 'function')
+check('the tab declares its locale namespace', tab?.locale, 'skill-mcp-panel')
 checkTrue('the slot yielded a component', typeof pageComponent === 'function')
 
 // ── 5. apply() must not touch a removed service ──────────────────────────

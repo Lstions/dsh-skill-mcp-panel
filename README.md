@@ -140,12 +140,36 @@ changes are live and need no restart.
 
 ## Settings UI
 
-The plugin contributes **one** surface under **Settings → Plugins**: the
-management page, registered into `settings.plugins.tab`.
+The plugin contributes the **same management page** to **two** slots, so it is
+reachable from both entry points the harness offers:
 
-| Surface | Slot | What it is |
+| Where the user goes | Slot | What it is |
 |---|---|---|
-| **Management page** | `settings.plugins.tab` | Skills, conflicts, MCP servers, and discovery settings. Reads the plugin's **own HTTP channel**. |
+| **Home → Plugins → Installed → this plugin** | `plugins.detail.section` | The plugin's own detail page — the primary entry. |
+| **Settings → Plugins → Skills & MCP** | `settings.plugins.tab` | The same page as a settings tab. |
+
+Both render one component; it reads and writes through this plugin's **own HTTP
+channel** (`/skill-mcp-panel/state`, `/skill-mcp-panel/apply`).
+
+`plugins.detail.section` receives no `only` filter — it renders once on **every**
+plugin's detail page — so the component checks the `subject` it is given and
+returns nothing for anyone else's page:
+
+| detail page | `subject` | rendered |
+|---|---|---|
+| a bundle (this plugin) | `{ kind: "bundle", pkg: { name } }` | yes |
+| one of its rows | `{ kind: "row", pkg: { name }, row }` | yes |
+| another bundle | `{ kind: "bundle", pkg: { name: other } }` | nothing |
+| an official plugin | `{ kind: "item", id }` | nothing |
+
+> **A note on where the ownership check lives.** It must be defined in the
+> module's top-level scope, not inside `apply()`. The page component is declared
+> at top level and closes over it; moving the helper inside `apply()` makes the
+> reference resolve to nothing, and the failure is subtle: the module still
+> activates, the Settings tab still works, and only the detail page goes blank —
+> with `slot entry crashed in 'plugins.detail.section'` left in the browser
+> console. `test/ui-page.mjs` renders the detail component directly so that class
+> of failure is a red test rather than a blank page.
 
 ### What changed in DSH 0.1.7, and why the card is gone
 
@@ -205,6 +229,18 @@ sections:
   be added, edited, removed and toggled; rows from an outer layer can only be
   toggled, and a row the harness itself manages is shown read-only with the
   reason.
+
+  **Add server** opens a connection form whose fields follow the transport:
+  `stdio` asks for `command`, `args` (one per line), `env` (`KEY=VALUE` per line)
+  and `cwd`; `streamable-http` asks for `url` and `headers` (`KEY: VALUE` per
+  line). A declared server gets **Edit** (the same form, prefilled) and
+  **Remove** in its expanded row. The name must be filled before the form is
+  usable, because the host rejects a duplicate name and the name is what the
+  operation addresses.
+
+  Secrets are never round-tripped in the clear: the host masks a secret-looking
+  value before sending it, and turns a submitted mask back into the stored value,
+  so an untouched field keeps its secret.
 - **Discovery settings** — roots, depth, rank, duplicate policy, hidden/flat
   handling, watch and debounce.
 
@@ -424,7 +460,8 @@ lib/state.js      the state document: skills, conflicts, roots, masking
 lib/http.js       the two management endpoints and their write gate
 lib/mcp.js        MCP server inventory, toggling and lifecycle
 lib/contract.js   frozen wire contract shared by every surface and the tests
-lib/client.js     browser half: the management page (registered into settings.plugins.tab)
+lib/client.js     browser half: the management page, registered into BOTH
+                  plugins.detail.section (Home → Plugins) and settings.plugins.tab
 locale/*.json     display title/description for the Plugins list (en + zh)
 icon.svg          the plugin icon shown in the Plugins list
 docs/             requirements, UX notes, the zh/en copy table, acceptance record
