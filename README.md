@@ -140,12 +140,48 @@ changes are live and need no restart.
 
 ## Settings UI
 
-The plugin contributes **two** surfaces, both under **Settings → Plugins**:
+The plugin contributes **one** surface under **Settings → Plugins**: the
+management page, registered into `settings.plugins.tab`.
 
 | Surface | Slot | What it is |
 |---|---|---|
-| Settings card | `settings.plugin.item` | Discovery configuration. Reads the `skill-mcp-panel` settings namespace. |
-| **Management page** | `settings.plugins.tab` | Skills, conflicts, MCP servers, and discovery settings. Reads the plugin's **own HTTP channel**, not `settingsScope`. |
+| **Management page** | `settings.plugins.tab` | Skills, conflicts, MCP servers, and discovery settings. Reads the plugin's **own HTTP channel**. |
+
+### What changed in DSH 0.1.7, and why the card is gone
+
+An earlier version also shipped a settings card in `settings.plugin.item`, fed by
+the `settingsScope` client service. **DSH 0.1.7 removed all three**: the slot, the
+service, and the server-side `installSection` API the plugin registered with. The
+consequences were not cosmetic and not loud:
+
+- **The client half never activated.** `settingsScope` was listed in the bundle's
+  `inject`, and a named service the host does not provide keeps the entry
+  `pending` forever. The host reports only
+  `1 entry did not activate — waiting for service: settingsScope`, and neither
+  the card nor the page renders.
+- **Every write was refused.** `installSection` no longer exists, so the
+  registration threw inside `ctx.inject(['settings'], …)`. That kills only the
+  child context, so the provider, the HTTP channel and the page all kept working
+  while the settings path was dead — which looks exactly like "I can see the
+  values but I cannot change any of them".
+- **Fields were read-only by design.** The 0.1.7 service only edits fields whose
+  schema declares `meta.volatile()`; without it a write fails with
+  `Plugin entry "…" has no volatile fields`.
+
+So this plugin now uses the 0.1.7 API throughout:
+
+| Concern | 0.1.6 | 0.1.7 |
+|---|---|---|
+| Register for settings | `settings.installSection(ctx, ns, …)` | `settings.configure({ auto: false }, fiber)` |
+| Editable fields | any schema field | each field needs `.volatile()` |
+| Read a live value | `setSource` getter | `config.field.get()` (a volatile holder) |
+| React to a write | `onChange` hook | `settings/document-updated` event |
+| Client service | `settingsScope` | `remote.settings` |
+| Per-plugin card slot | `settings.plugin.item` | **removed** — the tab is the surface |
+
+The card's code has been deleted rather than left dormant: its slot does not
+exist, so it could never render, and tested-but-unreachable code is how this
+defect stayed hidden.
 
 ### The management page
 
@@ -189,28 +225,30 @@ asserted to have identical key sets, and the page is asserted to render in
 Chinese under the `zh` locale. The copy table lives in
 [`docs/copy-zh-en.md`](docs/copy-zh-en.md).
 
-### The settings card
+### Editing configuration on the page
 
-The card follows the same conventions as the shipped plugin cards:
+**Discovery settings** is editable, not a readout. Every field the `Config`
+schema declares renders a real control — except `skills` and `mcpServers`, which
+the per-skill switches and the MCP section own — and each carries a **Reset** that
+writes `config.unset` so the composition row's value applies again:
 
-- **A collapsed disclosure card.** It renders an `<li>` with a header button
-  (name + description + chevron) and discloses its controls in place, rather
-  than spilling a flat form down the page. Collapsed is the default; it
-  auto-collapses again once a save settles.
-- **Bilingual.** `zh` and `en` dictionaries are registered through `ctx.locale`,
-  and the slot declares its locale namespace, so the card follows the active
-  locale — no re-registration needed on a language switch.
-- **Staged edits.** Controls hold drafts; **Save** writes only the fields you
-  changed as one atomic op list, so a value you never saw cannot be cleared.
-  **Discard changes** drops the draft. A field with a user override shows an
-  *Overridden* badge and a *Reset* action that writes an `unset`.
-- **Per-field validation.** Out-of-range depth, a non-numeric value, an empty
-  provider name and an unknown policy mark the field and disable Save with an
-  explanation, instead of failing at the Host.
-- **An *Unsaved* badge** marks a pending edit.
+| Field | Control | Writes |
+|---|---|---|
+| `roots` | textarea, one absolute path per line | `config.set` on blur |
+| `maxDepth`, `rank`, `watchDebounceMs` | number input | `config.set` on blur/Enter |
+| `duplicatePolicy`, `writeAccess` | select | `config.set` on change |
+| `watch`, `includeHidden`, `includeFlatRootFiles` | checkbox | `config.set` on change |
+| `providerName` | text input | `config.set` on blur/Enter |
 
-A namespace this Host does not serve renders **nothing at all**, so an
-uncomposed plugin leaves no trace on the page.
+Text and number fields hold a draft and commit on blur or Enter, so a
+half-typed path is never persisted; a checkbox and a select commit immediately
+because there is no partial value to protect. Reset per field writes
+`config.unset`, and clearing `roots` entirely also unsets rather than pinning an
+empty list.
+
+The page states whether the host is writable. When `writable` is false every
+control is **disabled with an explanation** rather than silently discarding an
+edit.
 
 ### Why the card can appear empty over a non-loopback address
 
@@ -386,7 +424,9 @@ lib/state.js      the state document: skills, conflicts, roots, masking
 lib/http.js       the two management endpoints and their write gate
 lib/mcp.js        MCP server inventory, toggling and lifecycle
 lib/contract.js   frozen wire contract shared by every surface and the tests
-lib/client.js     browser half: the settings card AND the management page
+lib/client.js     browser half: the management page (registered into settings.plugins.tab)
+locale/*.json     display title/description for the Plugins list (en + zh)
+icon.svg          the plugin icon shown in the Plugins list
 docs/             requirements, UX notes, the zh/en copy table, acceptance record
 tests/verify/     the independent adversarial acceptance suite
 ```
@@ -414,7 +454,7 @@ the page renders every string through `ctx.locale`.
 npm test                              # all suites, non-zero on any failure
 node test/run.js                      # provider: discovery, dedupe, policy, config
 node test/watch.mjs                   # watcher invalidation and re-watch
-node test/client.mjs                  # settings card: render, diff, write
+node test/client.mjs                  # client bundle contract: inject, slot, format
 node test/ui-page.mjs                 # management page: sections, N3, three-state, i18n
 node test/namespace-check.mjs         # namespace against the REAL settings provider
 node test/realtree.mjs [root ...]     # report what the real tree yields
@@ -455,14 +495,25 @@ profile if needed. It locates the package through the profile and then the pnpm
 content store, so it does not silently self-skip when a profile symlink dangles —
 a skip there once made "9/9 passed" a green that never executed.
 
-`test/client.mjs` and `test/ui-page.mjs` load the real browser bundle under a
-minimal React, locale, and slot harness. They drive the UI as a user would —
-expand a card, open a category, flip a switch — and assert collapsed-by-default
-disclosure, diff-based writes, per-field validation, override/reset, that both
-dictionaries are complete and resolve under a locale switch, and (the
-load-bearing one) that the **management page still renders and still toggles with
-no usable settings scope**, which is what a non-loopback page gets. That is the
-only way to exercise this behaviour without a browser.
+`test/ui-page.mjs` loads the real browser bundle under a minimal React, locale,
+and slot harness. It drives the page as a user would — open a category, type a
+new depth, flip a switch — and asserts collapsed-by-default disclosure,
+draft-then-commit editing, `config.unset` on Reset, that a non-writable host
+disables the controls, that both dictionaries are complete and resolve under a
+locale switch, and (the load-bearing one) that the **page renders and still
+writes with no usable settings scope**, which is what a non-loopback page gets.
+
+`test/client.mjs` asserts the bundle **contract** that decides whether the client
+half activates at all: the `inject` list names no service the host lacks (a
+pending inject silently unactivates the whole entry), exactly one slot is
+claimed, the bundle id equals the package name, and the bundle stays a
+self-contained CJS factory requiring only `react`.
+
+`test/namespace-check.mjs` asserts the settings **integration** against the real
+`@deepseek-ai/dsh-settings`: that the API this plugin calls still exists, and that
+**every** `Config` field declares `meta.volatile` — the property whose absence
+makes every write fail with `has no volatile fields`. It is mutation-checked:
+removing one `.volatile()` turns it red.
 
 ## Requirements
 

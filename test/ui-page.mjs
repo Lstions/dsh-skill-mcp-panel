@@ -199,6 +199,19 @@ const textOf = (node) => {
 const allText = (tree) => textOf(tree)
 const buttons = (tree) => collect(tree, isType('button'))
 const inputs = (tree) => collect(tree, isType('input'))
+const selects = (tree) => collect(tree, isType('select'))
+const defs = (tree) => collect(tree, (node) => node.type === 'dl')
+const textareas = (tree) => collect(tree, isType('textarea'))
+/**
+ * How many configuration fields the page must offer controls for.
+ *
+ * Counted from the host schema rather than hardcoded: `Config` has 12 fields, of
+ * which `skills` and `mcpServers` are owned by the switches and the MCP section,
+ * leaving 10 with a control and a Reset in the configuration section. Deriving
+ * it here means adding a schema field without a control fails the count instead
+ * of silently shipping an uneditable field.
+ */
+const CONFIG_FIELD_COUNT = 10
 
 async function flush(times = 6) {
   for (let i = 0; i < times; i += 1) await Promise.resolve()
@@ -372,6 +385,9 @@ async function mountPage(state, options = {}) {
   return {
     registrations,
     registration: captured.registration,
+    // What the bundle DECLARES it needs. A service named here that the host does
+    // not provide keeps the whole entry pending, so this is asserted directly.
+    inject: client.inject ?? [],
     fetchImpl,
     scopeReads,
     settle,
@@ -442,8 +458,17 @@ function makeLocale(active = 'en') {
   check('the tab id is the settings namespace', page.registration.id, 'skill-mcp-panel')
   check('the tab carries a localized label', typeof page.registration.label, 'function')
   check('the tab declares its locale namespace', page.registration.locale, 'skill-mcp-panel')
-  check('the settings card is still registered too', page.registrations.some((r) => r.name === 'settings.plugin.item'), true)
-  check('exactly two slots are claimed', page.registrations.length, 2)
+  // The page is the ONLY surface. An earlier version also claimed
+  // `settings.plugin.item`, but that slot was removed in 0.1.7 along with the
+  // `settingsScope` service that fed it, so a claim on it is inert. This asserts
+  // the current single-surface contract and would fail if someone reintroduced a
+  // registration into a slot nothing offers.
+  check('exactly one slot is claimed (the page)', page.registrations.length, 1)
+  check('no registration targets the removed settings.plugin.item slot', page.registrations.some((r) => r.name === 'settings.plugin.item'), false)
+  // Requiring a service the host no longer provides leaves the entire entry
+  // unactivated ("waiting for service"), which is a silent, total failure.
+  check('client inject declares slots and locale only', page.inject.join(','), 'slots,locale')
+  check('client inject does not require the removed settingsScope', page.inject.includes('settingsScope'), false)
 }
 
 // ─ 2. N3: the page renders with NO usable settings scope ──────────────────
@@ -705,6 +730,89 @@ function makeLocale(active = 'en') {
 {
   const page = await mountPage(makeState({ version: 99 }))
   check('an unknown state version shows an error rather than a blank page', allText(page.tree).includes('unsupported state version'), true)
+}
+
+// ─ 14. configuration is EDITABLE, not a read-only readout ────────────────
+// The defect this guards: the page once rendered the configuration as a
+// definition list, so every value was visible and none could be changed. A
+// regression that reverts to a display-only section must fail here.
+{
+  const page = await mountPage(makeState())
+  const text = allText(page.tree)
+
+  // Each field must render a real control, identified by its label's `for`.
+  // <textarea> and <select> are not <input>, so each is looked up in its own
+  // collector: asserting through `inputs` alone reports a control as missing
+  // when it renders perfectly well.
+  const controls = [...inputs(page.tree), ...selects(page.tree), ...textareas(page.tree)]
+  const hasControl = (id) => controls.some((node) => node.props.id === id)
+  check('config: roots is an editable textarea', hasControl('skill-mcp-panel-page-roots'), true)
+  check('config: maxDepth is an editable number input', hasControl('skill-mcp-panel-page-maxDepth'), true)
+  check('config: rank is an editable number input', hasControl('skill-mcp-panel-page-rank'), true)
+  check('config: watchDebounceMs is an editable number input', hasControl('skill-mcp-panel-page-watchDebounceMs'), true)
+  check('config: providerName is an editable text input', hasControl('skill-mcp-panel-page-providerName'), true)
+  check('config: watch is an editable checkbox', hasControl('skill-mcp-panel-page-watch'), true)
+  check('config: includeHidden is an editable checkbox', hasControl('skill-mcp-panel-page-includeHidden'), true)
+  check('config: includeFlatRootFiles is an editable checkbox', hasControl('skill-mcp-panel-page-includeFlatRootFiles'), true)
+
+  // A select is the right control for an enumerated field.
+  check('config: duplicatePolicy renders a select', hasControl('skill-mcp-panel-page-duplicatePolicy'), true)
+  check('config: writeAccess renders a select', hasControl('skill-mcp-panel-page-writeAccess'), true)
+
+  // The section explains that edits apply live and how to undo one.
+  check('config: the section states that edits are live', text.includes('need no restart'), true)
+  check('config: a Reset action is offered', buttons(page.tree).some((n) => textOf(n) === 'Reset'), true)
+
+  // No field is left as plain text: the old readout rendered these as <dt>.
+  check('config: no definition list remains for the settings', defs(page.tree).length, 0)
+}
+
+// ─ 15. an edit actually writes the right op ──────────────────────────────
+{
+  const page = await mountPage(makeState())
+  const depth = inputs(page.tree).find((node) => node.props.id === 'skill-mcp-panel-page-maxDepth')
+  check('the maxDepth control is present to drive', depth !== undefined, true)
+  // Type a new value, then commit it the way a user does (blur).
+  depth.props.onChange({ target: { value: '7' } })
+  await page.settle()
+  check('typing alone does not write (the field is a draft)', page.fetchImpl.calls.some((c) => c.input === '/skill-mcp-panel/apply'), false)
+  const after = inputs(page.tree).find((node) => node.props.id === 'skill-mcp-panel-page-maxDepth')
+  after.props.onBlur({ target: { value: '7' } })
+  await page.settle()
+  const posted = page.fetchImpl.calls.filter((c) => c.input === '/skill-mcp-panel/apply').pop()
+  check('committing writes through the apply route', posted !== undefined, true)
+  const body = JSON.parse(posted.init.body)
+  check('the write carries a config.set op', body.ops[0].kind, 'config.set')
+  check('the write names the edited field', body.ops[0].key, 'maxDepth')
+  check('the write carries the typed value as a number', body.ops[0].value, 7)
+}
+
+// ─ 16. a boolean and a select commit immediately, and Reset unsets ───────
+{
+  const page = await mountPage(makeState())
+  const watch = inputs(page.tree).find((node) => node.props.id === 'skill-mcp-panel-page-watch')
+  watch.props.onChange({ target: { checked: false } })
+  await page.settle()
+  let posted = page.fetchImpl.calls.filter((c) => c.input === '/skill-mcp-panel/apply').pop()
+  let body = JSON.parse(posted.init.body)
+  check('a checkbox writes without a separate save step', body.ops[0].kind, 'config.set')
+  check('the checkbox write carries a boolean', body.ops[0].value, false)
+
+  const row = buttons(page.tree).filter((n) => textOf(n) === 'Reset')
+  check('every configurable field offers Reset', row.length, CONFIG_FIELD_COUNT)
+  row[0].props.onClick()
+  await page.settle()
+  posted = page.fetchImpl.calls.filter((c) => c.input === '/skill-mcp-panel/apply').pop()
+  body = JSON.parse(posted.init.body)
+  check('Reset writes config.unset rather than pinning the current value', body.ops[0].kind, 'config.unset')
+}
+
+// ─ 17. a read-only deployment disables the controls instead of lying ─────
+{
+  const page = await mountPage(makeState({ writable: false }))
+  const depth = inputs(page.tree).find((node) => node.props.id === 'skill-mcp-panel-page-maxDepth')
+  check('a non-writable deployment disables the field', depth.props.disabled, true)
+  check('a non-writable deployment says so', allText(page.tree).includes('read-only'), true)
 }
 
 await flush()

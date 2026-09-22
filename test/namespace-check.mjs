@@ -1,144 +1,172 @@
 /**
- * Boot the REAL settings provider and the REAL plugin together, then assert the
- * settings namespace registers and is readable.
+ * Contract check for the settings integration, against the REAL
+ * `@deepseek-ai/dsh-settings` that this deployment ships.
  *
- * This is the check the GUI cannot give on demand: it exercises
- * `installSection` against the actual `@deepseek-ai/dsh-settings-file` provider
- * (not a stub) and confirms the namespace a Settings card would render.
+ * WHY THIS FILE WAS REWRITTEN
  *
- * It needs the deployment's settings provider, so point `DSH_PROFILE_DIR` at the
- * profile (default `~/.dsh/profiles/web`) and run it directly:
+ * It used to boot `@deepseek-ai/dsh-settings-file` and assert that
+ * `installSection` registered a namespace. Both halves of that became wrong when
+ * the harness updated:
+ *
+ *   - `dsh-settings-file` no longer exists; its behaviour moved into
+ *     `dsh-settings`, so the suite self-skipped and verified NOTHING while
+ *     `npm test` still printed a green exit.
+ *   - `installSection` no longer exists either. The suite that was supposed to
+ *     catch that was the one silently skipping, so the plugin shipped calling a
+ *     method the runtime does not have — which is why the UI could show values
+ *     and never save them.
+ *
+ * WHAT IT CHECKS NOW
+ *
+ * The two properties whose absence caused that defect, asserted against the real
+ * package rather than this plugin's beliefs:
+ *
+ *   1. The shipped settings service still offers the API this plugin calls
+ *      (`configure`, `write`, `mutate`), so a future rename fails here loudly
+ *      instead of at run time.
+ *   2. EVERY field of this plugin's `Config` declares `meta.volatile`, walked
+ *      with the same rule the service uses. A non-volatile field is
+ *      display-only: the service refuses the write with
+ *      `Config field "..." is not volatile`.
+ *
+ * It also asserts the schema envelope the service needs to project a form.
+ *
+ * Run directly:
  *   node test/namespace-check.mjs
  */
-import { Context } from '@deepseek-ai/cordis'
-import { pathToFileURL } from 'node:url'
-import { existsSync, readdirSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { apply as skillNestingApply, SETTINGS_NAMESPACE, Config } from '../lib/index.js'
+import { pathToFileURL } from 'node:url'
+import { Config } from '../lib/index.js'
 import { makeChecker } from './harness.mjs'
 
 const { results, check } = makeChecker()
+const PACKAGE = 'dsh-settings'
 
 /**
- * Import the deployment's settings provider.
+ * Locate a package's `lib/index.js` in the deployment.
  *
- * A bare specifier would resolve against THIS file's location, not the profile,
- * so the profile directory is resolved explicitly and the package is imported by
- * absolute URL. That keeps the check runnable straight from the package without
- * requiring the profile to be the working directory.
+ * The profile's own `node_modules` is a symlink farm that regularly dangles
+ * after a harness update, so the pnpm content store is searched too. Resolution
+ * never falls back to a bare specifier: that would resolve against THIS file's
+ * location and silently test a stale copy instead of the deployment's.
  */
-const profileDir = process.env.DSH_PROFILE_DIR ?? join(homedir(), '.dsh', 'profiles', 'web')
-// The profile's own node_modules comes first, then the shared parent. Both are
-// often SYMLINK FARMS whose entries may dangle after an upgrade, so a plain
-// existsSync on the two literal paths silently reports "provider absent" and
-// this whole suite self-skips — verified nothing while printing a green exit.
-// The pnpm content store is searched as well, so the suite runs whenever the
-// deployment's settings provider exists anywhere reachable.
-const candidates = [
-  join(profileDir, 'node_modules', '@deepseek-ai', 'dsh-settings-file', 'lib', 'index.js'),
-  join(profileDir, '..', 'node_modules', '@deepseek-ai', 'dsh-settings-file', 'lib', 'index.js'),
-]
-
-/** Locate the provider inside a pnpm store, newest layout first. */
-function searchPnpmStore() {
+function locate(packageName) {
+  const profileDir = process.env.DSH_PROFILE_DIR ?? join(homedir(), '.dsh', 'profiles', 'web')
+  const literal = [
+    join(profileDir, 'node_modules', '@deepseek-ai', packageName, 'lib', 'index.js'),
+    join(profileDir, '..', 'node_modules', '@deepseek-ai', packageName, 'lib', 'index.js'),
+  ]
+  for (const candidate of literal) {
+    // `existsSync` follows symlinks, so a dangling farm entry correctly fails here.
+    if (existsSync(candidate)) return candidate
+  }
   const root = process.env.DSH_PNPM_STORE ?? join(homedir(), '.local', 'share', 'pnpm', 'global', 'v11')
   if (!existsSync(root)) return undefined
-  let stores
-  try {
-    stores = readdirSync(root)
-  } catch {
-    return undefined
-  }
-  for (const store of stores) {
+  for (const store of readdirSync(root)) {
     const pnpm = join(root, store, 'node_modules', '.pnpm')
     if (!existsSync(pnpm)) continue
-    let entries
-    try {
-      entries = readdirSync(pnpm)
-    } catch {
-      continue
-    }
-    for (const entry of entries) {
-      if (!entry.startsWith('@deepseek-ai+dsh-settings-file@')) continue
-      const lib = join(pnpm, entry, 'node_modules', '@deepseek-ai', 'dsh-settings-file', 'lib', 'index.js')
+    for (const entry of readdirSync(pnpm)) {
+      if (!entry.startsWith(`@deepseek-ai+${packageName}@`)) continue
+      const lib = join(pnpm, entry, 'node_modules', '@deepseek-ai', packageName, 'lib', 'index.js')
       if (existsSync(lib)) return lib
     }
   }
   return undefined
 }
 
-const providerPath = candidates.find((candidate) => existsSync(candidate)) ?? searchPnpmStore()
-if (providerPath === undefined) {
-  console.log('SKIP  settings provider not found; looked in:')
-  for (const candidate of candidates) console.log(`  ${candidate}`)
-  console.log('  and the pnpm content store under $DSH_PNPM_STORE or ~/.local/share/pnpm/global')
-  console.log('Set DSH_PROFILE_DIR to the profile that owns this deployment.')
-  process.exit(0)
+const settingsPath = locate(PACKAGE)
+if (settingsPath === undefined) {
+  // NOT a skip. The package is part of every 0.1.7 deployment, so its absence
+  // means the check cannot run and must not be reported as success.
+  console.log(`FAIL  could not locate @deepseek-ai/${PACKAGE} in this deployment`)
+  console.log('      looked in the profile, its parent, and the pnpm content store')
+  console.log('      set DSH_PROFILE_DIR to the profile that owns this deployment')
+  process.exit(1)
 }
-const FileSettingsProvider = (await import(pathToFileURL(providerPath).href)).default
+console.log(`using ${settingsPath}`)
 
-/** `skills` is a hard dependency of the plugin under test. */
-class FakeSkills {
-  constructor(ctx) {
-    this.ctx = ctx
-  }
-  registerProvider(create) {
-    create({ invalidate: () => {} })
-    return () => {}
-  }
+const settingsModule = await import(pathToFileURL(settingsPath).href)
+const service = settingsModule.SettingsForms ?? settingsModule.default
+
+// ── 1. the API this plugin calls still exists ────────────────────────────
+check('the shipped settings service is exported', typeof service, 'function')
+if (typeof service === 'function') {
+  const proto = service.prototype
+  // `configure` replaced `installSection`; the plugin mounts with whichever the
+  // runtime offers, and this pins that at least one path is always available.
+  check('the service offers configure() (0.1.7+ path)', typeof proto.configure, 'function')
+  check('the service offers write()', typeof proto.write, 'function')
+  check('the service offers mutate()', typeof proto.mutate, 'function')
+  check('the service reports writability', typeof Object.getOwnPropertyDescriptor(proto, 'writable')?.get, 'function')
 }
 
-const ctx = new Context()
-ctx.provide('skills', new FakeSkills(ctx))
+// ── 2. every Config field is volatile, walked the service's way ──────────
+// `volatileForm`/`isVolatilePath` work on the schema's JSON projection, from the
+// root down: a field is live when it or its nearest ancestor is volatile. This
+// mirrors that rule exactly, so a field the service would refuse is caught here.
+const json = Config.toJSON()
+const resolveRef = (node) => (typeof node === 'number' ? json.refs[node] : node)
+const root = resolveRef(json.uid)
 
-await ctx.plugin(FileSettingsProvider, { filename: '/tmp/dsh-nesting-namespace-check.yaml', pollIntervalMs: 100000 })
-// Mount through the shipped plugin's own export so the real `inject`/`apply`
-// pair is exercised. Two details matter:
-//   - the plugin object needs a `name`, because Cordis rejects an anonymous
-//     object plugin;
-//   - `apply` is called from a BLOCK body. An expression-bodied arrow returns
-//     the value of `skillNestingApply(...)`, and Cordis interprets a returned
-//     non-function as an effect callback, failing with "Invalid effect".
-await ctx.plugin(
-  {
-    name: 'skill-mcp-panel',
-    inject: ['skills'],
-    apply: (c) => {
-      skillNestingApply(c, { roots: ['/tmp'], watch: false })
-    },
-  },
-  {},
+/** Collect the leaf field paths of the projected schema. */
+function leafPaths(node, prefix = [], seen = new Set()) {
+  const resolved = resolveRef(node)
+  if (resolved === undefined) return []
+  if (resolved.meta?.volatile) return [prefix.join('.')] // a volatile ancestor covers its children
+  const dict = resolved.dict
+  if (dict === undefined) return prefix.length === 0 ? [] : [prefix.join('.')]
+  const out = []
+  for (const [key, child] of Object.entries(dict)) {
+    out.push(...leafPaths(child, [...prefix, key], seen))
+  }
+  return out
+}
+
+const path = root.dict === undefined ? [] : Object.entries(root.dict).map(([key]) => key)
+check('the schema projects an object with fields', path.length > 0, true)
+
+const nonVolatile = path.filter((key) => {
+  const field = resolveRef(root.dict[key])
+  return field?.meta?.volatile !== true
+})
+check(
+  'EVERY Config field is volatile (a non-volatile field cannot be saved)',
+  nonVolatile.join(',') === '' ? 'all volatile' : `NON-VOLATILE: ${nonVolatile.join(', ')}`,
+  'all volatile',
 )
 
-const settings = ctx.get('settings')
-check('the settings service is present', settings !== undefined, true)
-
-const value = settings.get(SETTINGS_NAMESPACE)
-check('the namespace registers against the real provider', value !== undefined, true)
-
-if (value !== undefined) {
-  const described = settings.describe({ redactSecrets: true }).find((entry) => entry.ns === SETTINGS_NAMESPACE)
-  check('the namespace is describable for a settings surface', described !== undefined, true)
-  check('the descriptor carries a schema envelope for the generated form', described?.schema !== undefined, true)
-  check('the resolved roots come from the composition base', [...value.roots], ['/tmp'])
-  // The namespace also carries the management state this plugin persists:
-  // per-skill toggles, the MCP declarations it owns, and the write-access mode.
-  check('every field resolves with a default', Object.keys(value).sort().join(','), [
-    'duplicatePolicy', 'includeFlatRootFiles', 'includeHidden', 'maxDepth',
-    'mcpServers', 'providerName', 'rank', 'roots', 'skills', 'watch',
-    'watchDebounceMs', 'writeAccess',
-  ].join(','))
+// The exact fields the management page writes must each be individually live,
+// because the service rejects a path that is not under a volatile node.
+for (const key of ['roots', 'maxDepth', 'rank', 'duplicatePolicy', 'providerName', 'writeAccess', 'watch', 'watchDebounceMs', 'includeHidden', 'includeFlatRootFiles', 'skills', 'mcpServers']) {
+  const field = resolveRef(root.dict?.[key])
+  check(`config field "${key}" is volatile`, field?.meta?.volatile === true, true)
 }
 
-// The schema must satisfy the settings service's contract, or the generated
-// client form cannot rehydrate it.
-check('the schema is callable', typeof Config, 'function')
+// ── 3. the schema envelope the service needs to project a form ───────────
 check('the schema exposes toJSON for wire serialisation', typeof Config.toJSON, 'function')
 check('the schema exposes ~standard.validate', typeof Config['~standard']?.validate, 'function')
+check('the projected schema carries refs for $defs resolution', typeof json.refs, 'object')
+check('the schema round-trips through JSON', typeof JSON.parse(JSON.stringify(json)).uid, 'number')
 
-await ctx.fiber.dispose()
+// The service reads defaults from the projection; a lost default would make a
+// generated form render an empty control for a field that has one.
+const depth = resolveRef(root.dict?.maxDepth)
+check('a projected field keeps its default', depth?.meta?.default, 4)
+
+// ── 4. no stale reference to the removed API in shipped source ───────────
+// Guards against a half-migration: calling `installSection` unguarded is what
+// killed the settings registration while everything else kept working.
+const sources = ['lib/index.js', 'lib/client.js', 'lib/state.js', 'lib/http.js', 'lib/mcp.js', 'lib/toggle.js']
+const offenders = sources.filter((file) => {
+  const text = readFileSync(new URL(`../${file}`, import.meta.url), 'utf8')
+  // A guarded fallback is fine and expected; an unguarded primary call is not.
+  return /settingsService\.installSection\(/.test(text) && !/typeof settingsService\?\.installSection === 'function'/.test(text)
+})
+check('installSection is only called behind a capability check', offenders.join(',') === '' ? 'guarded' : `UNGUARDED: ${offenders.join(', ')}`, 'guarded')
 
 const failed = results.filter((result) => !result.ok)
 console.log(`\n${results.length - failed.length}/${results.length} checks passed`)
+if (failed.length > 0) console.log(`FAILED:\n${failed.map((entry) => `  - ${entry.label}`).join('\n')}`)
 process.exit(failed.length === 0 ? 0 : 1)

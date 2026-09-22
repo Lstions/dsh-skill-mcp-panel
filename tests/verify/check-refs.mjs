@@ -56,11 +56,35 @@ for (const file of walk(ROOT).filter((f) => /\.(mjs|js|cjs)$/.test(f) && !f.incl
 
 // The package manifest's own entry points must exist, or an install produces a
 // package that cannot be loaded.
+//
+// A subpath pattern (`./locale/*.json`) is a GLOB, not a path: checking it
+// literally reports a correct manifest as broken. A pattern is valid when it
+// matches at least one real file, which is the property an importer relies on.
 const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'))
 const entries = [pkg.main, ...Object.values(pkg.exports ?? {}).flatMap((v) => (typeof v === 'string' ? [v] : Object.values(v)))]
+const globToRegExp = (pattern) =>
+  new RegExp(
+    '^' +
+      pattern
+        .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+        .replace(/\*/g, '[^/]*')
+        .replace(/\?/g, '[^/]') +
+      '$',
+  )
 for (const entry of entries) {
   if (typeof entry !== 'string' || !entry.startsWith('.')) continue
   checked += 1
+  if (entry.includes('*')) {
+    const matcher = globToRegExp(entry)
+    const hit = walk(ROOT).some(
+      (file) => !file.includes('node_modules') && matcher.test(`./${relative(ROOT, file).replaceAll('\\', '/')}`),
+    )
+    if (!hit) {
+      console.log(`BROKEN package.json entry pattern -> ${entry} (matches nothing)`)
+      broken += 1
+    }
+    continue
+  }
   if (!existsSync(join(ROOT, entry))) {
     console.log(`BROKEN package.json entry -> ${entry}`)
     broken += 1
@@ -86,6 +110,49 @@ if (existsSync(clientPath)) {
   const id = /id:\s*["']([^"']+)["']/.exec(readFileSync(clientPath, 'utf8'))?.[1]
   if (id !== pkg.name) {
     console.log(`BROKEN client bundle id -> ${JSON.stringify(id)} but package name is ${JSON.stringify(pkg.name)}`)
+    broken += 1
+  }
+}
+
+// Display metadata. `readPluginMeta` resolves `<pkg>/locale/en.json` for a
+// `meta.title` / `meta.description` and inlines `icon` from the manifest, so a
+// locale file that is not exported — or an icon outside the package — silently
+// degrades a plugin card to the bare package name.
+const localeDir = join(ROOT, 'locale')
+if (existsSync(localeDir)) {
+  const files = readdirSync(localeDir).filter((name) => name.endsWith('.json'))
+  checked += 1
+  if (!files.includes('en.json')) {
+    console.log('BROKEN locale -> en.json is missing, so no display title resolves')
+    broken += 1
+  }
+  for (const name of files) {
+    checked += 1
+    let meta
+    try {
+      meta = JSON.parse(readFileSync(join(localeDir, name), 'utf8')).meta
+    } catch (error) {
+      console.log(`BROKEN locale/${name} -> not valid JSON: ${String(error)}`)
+      broken += 1
+      continue
+    }
+    if (typeof meta?.title !== 'string' || meta.title.trim() === '') {
+      console.log(`BROKEN locale/${name} -> meta.title must be a non-empty string`)
+      broken += 1
+    }
+  }
+}
+
+if (pkg.icon !== undefined) {
+  checked += 1
+  const iconPath = join(ROOT, pkg.icon)
+  // The reader rejects absolute paths, URLs, paths outside the package, and
+  // symlinks that leave it; a plain relative file is the supported form.
+  if (!existsSync(iconPath) || !statSync(iconPath).isFile()) {
+    console.log(`BROKEN icon -> ${pkg.icon} is not a file inside the package`)
+    broken += 1
+  } else if (statSync(iconPath).size > 256 * 1024) {
+    console.log(`BROKEN icon -> ${pkg.icon} exceeds 256 KiB`)
     broken += 1
   }
 }
