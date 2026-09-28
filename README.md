@@ -557,6 +557,61 @@ removing one `.volatile()` turns it red.
 Node.js ≥ 20.13 for `fs.watch(..., { recursive: true })`, plus
 `@deepseek-ai/schemastery` for the settings schema.
 
+## DSH version compatibility
+
+DSH refuses to **enable** a plugin whose `peerDependencies` reject the running
+version. The Plugin Manager lists it as 异常 / *incompatible* and says running it
+"may cause crashes or data loss" — which reads like a code break but is often
+only how the range was written.
+
+The check is `evaluatePluginCompatibility` in `@deepseek-ai/dsh-app-boot`. It
+looks **only** at peers named `@deepseek-ai/dsh` or `@deepseek-ai/dsh-*`, and
+tests each range against the running version with
+`semver.satisfies(runtime, range, { includePrerelease: true })`.
+
+### Why `^0.1.7-alpha.1` broke on DSH 0.2.0
+
+A caret range on a `0.x` version pins the **minor** version — `^0.1.7-alpha.1`
+means `>=0.1.7-alpha.1 <0.2.0`. So it can never accept `0.2.0-rc.1`, and the
+plugin was flagged incompatible on an upgrade where **every API it uses was
+still present and unchanged**.
+
+This plugin therefore declares an explicit range:
+
+```json
+"peerDependencies": {
+  "@deepseek-ai/dsh-settings": ">=0.1.7-alpha.1 <0.3.0"
+}
+```
+
+`0.1.7` is the floor because 0.1.6 and earlier use the removed `installSection`
+API; `<0.3.0` is the ceiling because nothing beyond 0.2.x has been verified. Both
+ends are deliberate — a range wider than what was actually tested is worse than
+no range, because it converts a clear refusal into a crash.
+
+| DSH | accepted | why |
+|---|---|---|
+| ≤ 0.1.6 | no | `installSection` was the only registration path there; removed in 0.1.7 |
+| 0.1.7 (alpha / rc) | yes | verified against the real packages |
+| 0.2.0-rc.1 | yes | every API re-checked against the 0.2.0 sources |
+| ≥ 0.3.0 | no | not yet verified |
+
+### Verifying on a new DSH
+
+`test/compat-check.mjs` calls the deployment's **own**
+`evaluatePluginCompatibility` — not a reimplementation — so it follows the real
+rule if that rule changes. It asserts the accepted and rejected version lists
+above, and separately rejects a caret range on a `0.x` peer, which is the exact
+mistake that caused this outage.
+
+```sh
+node test/compat-check.mjs
+```
+
+Adding support for a new DSH means verifying the APIs actually work there and
+then adding the version to `SUPPORTED`; the test fails if the range and the
+verified list disagree.
+
 ## License
 
 MIT

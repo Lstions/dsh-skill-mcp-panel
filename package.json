@@ -1,6 +1,6 @@
 {
   "name": "dsh-skill-mcp-panel",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "private": true,
   "description": "Recursive, multi-root skill discovery with per-skill switches, duplicate-name reporting and MCP server management for the DeepSeek Harness",
   "type": "module",
@@ -50,7 +50,7 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.2",
-    "@deepseek-ai/dsh-settings": "^0.1.7-alpha.1"
+    "@deepseek-ai/dsh-settings": ">=0.1.7-alpha.1 <0.3.0"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/cordis": {

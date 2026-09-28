@@ -28,6 +28,10 @@ const suites = [
   // resolve. This runs before anything else because a broken path makes every
   // later suite fail in a way that looks like a product bug.
   { name: 'package structure (references, manifest, bundle patch)', file: join(repo, 'tests', 'verify', 'check-refs.mjs') },
+  // 兼容性也必须先查：peer 范围写错时插件照常安装、照常加载，只是被 DSH 标成
+  // 「异常」并拒绝启用，而报错文案说的是「可能导致崩溃或数据丢失」—— 看起来像
+  // 代码不兼容，实际常常只是范围写法。这里调用 DSH 自己的判定函数。
+  { name: 'host compatibility (peer ranges vs real checker)', file: join(here, 'compat-check.mjs') },
   { name: 'provider (discovery, dedupe, policy, config)', file: join(here, 'run.js') },
   { name: 'watcher (invalidation, re-watch)', file: join(here, 'watch.mjs') },
   { name: 'settings card (render, diff, write)', file: join(here, 'client.mjs') },
