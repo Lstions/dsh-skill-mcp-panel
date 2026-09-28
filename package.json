@@ -36,7 +36,8 @@
     "locale",
     "cordis.patch.yml",
     "icon.svg",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "test": "node test/all.mjs",

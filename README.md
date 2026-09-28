@@ -557,6 +557,40 @@ removing one `.volatile()` turns it red.
 Node.js ≥ 20.13 for `fs.watch(..., { recursive: true })`, plus
 `@deepseek-ai/schemastery` for the settings schema.
 
+## Versioning
+
+Releases are semver and every released version has a `vX.Y.Z` git tag pointing at
+the exact commit; [CHANGELOG.md](CHANGELOG.md) records what changed.
+
+**Referenceable versions start at `1.4.0`.** Before that, this repository
+published some version numbers twice with different content:
+
+| version | commits | what differed |
+|---|---|---|
+| `1.3.0` | `2aa18f3`, `48cc721` | 426 lines, and the plugin-detail registration went from 0 to 4 — the second commit is what fixed the blank detail page |
+| `1.2.0` | `8078ad3`, `1735ed1` | `49ded37` renamed the package and moved it to the repo root without a major bump |
+
+So `1.3.0` could not identify its content: the version that showed a blank page
+and the version that fixed it carried the same number. That history is kept
+as-is rather than retagged — tagging an ambiguous version would turn the
+ambiguity into an "official release".
+
+`test/version-check.mjs` keeps this from recurring:
+
+- the `package.json` version is valid semver and appears as a `## [X.Y.Z]`
+  section in the CHANGELOG, newest first;
+- **no version appears as a release section twice** — the direct regression test;
+- the README and `lib/` carry no hard-coded package version, so the number has
+  exactly one source;
+- the history table above still shows *both* rows for the duplicated versions.
+  That duplication is deliberate forensic evidence, so the check distinguishes
+  it from a real double release: duplicates are allowed in the history table and
+  forbidden in the release sections.
+
+When bumping: pick the level by what the change does to an installer — breaking
+install path or package name is major, a new surface or behaviour is minor, a fix
+is patch — then add the CHANGELOG section and tag the commit.
+
 ## DSH version compatibility
 
 DSH refuses to **enable** a plugin whose `peerDependencies` reject the running

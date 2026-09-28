@@ -28,6 +28,10 @@ const suites = [
   // resolve. This runs before anything else because a broken path makes every
   // later suite fail in a way that looks like a product bug.
   { name: 'package structure (references, manifest, bundle patch)', file: join(repo, 'tests', 'verify', 'check-refs.mjs') },
+  // 版本号也要先管住：这个仓库曾把同一个版本号发过两次内容不同的提交，于是
+  // 「1.3.0」无法唯一标识内容。CHANGELOG 与 package.json 必须一致，且发布段
+  // 不得重复。
+  { name: 'version management (CHANGELOG, semver, one source)', file: join(here, 'version-check.mjs') },
   // 兼容性也必须先查：peer 范围写错时插件照常安装、照常加载，只是被 DSH 标成
   // 「异常」并拒绝启用，而报错文案说的是「可能导致崩溃或数据丢失」—— 看起来像
   // 代码不兼容，实际常常只是范围写法。这里调用 DSH 自己的判定函数。
