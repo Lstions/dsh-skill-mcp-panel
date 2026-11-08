@@ -14,9 +14,3 @@ node_modules/
 
 # Scratch output from the test helpers
 .verify/
-# Sibling plugin sources and the local skill library live in this folder for
-# convenience but are separate projects: they keep their own repositories (or
-# none), so they are never committed to this package's repository.
-/loop-guard/
-/web-password-auth/
-/skills/
