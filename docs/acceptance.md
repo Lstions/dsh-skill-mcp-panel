@@ -9,7 +9,7 @@
 ## 0. 怎么跑（任何人可直接执行）
 
 ```bash
-cd /home/sun/workspace/dsh-plugins
+cd /home/sun/workspace/dsh-plugins/skill-mcp-panel
 
 # 独立验收套件（本文件的主要证据来源）
 node tests/verify/run.mjs              # 全部用例，含原始观测
@@ -366,7 +366,7 @@ POST /skill-mcp-panel/apply {revision:2, ops:[{kind:'skill.toggle', name:'api-en
 verify: 0 passed, 1 failed, 0 blocked (of 1)
 ```
 
-**最小复现**：`cd /home/sun/workspace/dsh-plugins && node tests/verify/run.mjs f3cache`
+**最小复现**：`cd /home/sun/workspace/dsh-plugins/skill-mcp-panel && node tests/verify/run.mjs f3cache`
 → 我当时连跑 **3 次全部 FAIL**。
 
 **根因**：`f3cache` 仍按**旧的 OMIT 策略**断言「开关后 `list()` 必须与之前不同」，

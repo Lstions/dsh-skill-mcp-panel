@@ -4,9 +4,11 @@ A recursive, multi-root skill provider for the DeepSeek Harness (DSH), with
 per-skill switches, duplicate-name reporting, MCP server management, and a
 bilingual settings UI.
 
-The package at the repository root **is** the plugin: `package.json` declares
+This folder **is** the plugin package: `package.json` declares
 `dsh.bundle.patch`, so installing it also gives the profile a composition layer.
-There is no separate subdirectory to point at.
+Its parent `dsh-plugins/` is a plain container holding several plugin projects
+(`skill-mcp-panel/`, `loop-guard/`, `web-password-auth/`) next to the machine's
+`skills/` library — that container is not a repository and ships nothing.
 
 ## The problem it solves
 
@@ -43,12 +45,12 @@ duplicate of itself.
 
 ## Install
 
-The package root **is** the plugin, and it declares `dsh.bundle.patch`, so one
+This folder **is** the plugin, and it declares `dsh.bundle.patch`, so one
 command installs *and* activates it:
 
 ```sh
 # Local checkout (the primary flow, verified end to end)
-dsh plugin --profile web add /absolute/path/to/this/repo
+dsh plugin --profile web add /absolute/path/to/dsh-plugins/skill-mcp-panel
 
 # Then restart the profile.
 ```
@@ -466,9 +468,7 @@ preset would make it visible only to sessions on that preset.
 
 ## Layout
 
-This folder is the local plugin workspace. The package at its root is
-`dsh-skill-mcp-panel`; the other entries are separate projects kept here so all
-locally developed plugins and the local skill library live in one place.
+Inside the plugin package (this folder):
 
 ```
 package.json        the package MANIFEST: dsh.bundle.patch + dsh.client
@@ -485,17 +485,23 @@ locale/*.json       display title/description for the Plugins list (en + zh)
 icon.svg            the plugin icon shown in the Plugins list
 docs/               requirements, UX notes, the zh/en copy table, acceptance record
 tests/verify/       the independent adversarial acceptance suite
-
-skills/             the local SKILL LIBRARY (not part of this package; see
-                    docs/skills-layout.md). Git-ignored here on purpose.
-loop-guard/         a separate plugin project (own repository, own package)
-web-password-auth/  a separate plugin project (own repository, own package)
 ```
 
-`skills/`, `loop-guard/` and `web-password-auth/` are **not** shipped with this
-package: they are not listed in `files`, they are ignored by this repository, and
-the plugin never reads them as code. Pointing a profile at `skills/` is a
-machine-local configuration choice (`~/.dsh/profiles/web/cordis.patch.yml`).
+The **parent** folder is a container, not part of this package:
+
+```
+dsh-plugins/
+├── skill-mcp-panel/     this plugin  (own repository)
+├── loop-guard/          another plugin project (own repository, own package)
+├── web-password-auth/   another plugin project (own repository, own package)
+└── skills/              the local SKILL LIBRARY (see docs/skills-layout.md)
+```
+
+Only this folder is installed into a profile, and only the paths in `files` are
+published. Sibling projects and `skills/` are separate content with separate
+versioning; the plugin never reads them as code. Pointing a profile at
+`../skills` is a machine-local configuration choice
+(`~/.dsh/profiles/web/cordis.patch.yml`).
 
 `lib/client.js` is a hand-written `window.__ModuleLoader__.load({ id, factory })`
 bundle (the format `tsdown` emits), so no build step is needed. **Its `id` must
@@ -591,7 +597,7 @@ Node.js ≥ 20.13 for `fs.watch(..., { recursive: true })`, plus
 Releases are semver and every released version has a `vX.Y.Z` git tag pointing at
 the exact commit; [CHANGELOG.md](CHANGELOG.md) records what changed.
 
-**Referenceable versions start at `1.4.0`; the current version is `1.4.1`.**
+**Referenceable versions start at `1.4.0`; the current version is `1.4.2`.**
 Before `1.4.0`, this repository published some version numbers twice with
 different content:
 

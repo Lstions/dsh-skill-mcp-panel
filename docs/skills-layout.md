@@ -1,6 +1,7 @@
 # 技能库布局（`dsh-plugins/skills/`）
 
-本机技能库的新家：`/home/sun/workspace/dsh-plugins/skills`，与插件源码放在一起。
+本机技能库的新家：`/home/sun/workspace/dsh-plugins/skills`，和各个插件项目并列放在
+插件集合目录里（不是某个插件的源码目录内部）。
 
 ## 目录规则
 
@@ -54,6 +55,9 @@ description: "一句话说明什么时候用这个技能。"
 
 ## 版本管理
 
-外层仓库 `dsh-skill-mcp-panel` 用 `.gitignore` 忽略了 `/skills/`：技能库是
-独立内容，不跟这个插件的发布版本绑定。要版本化就给
-`/home/sun/workspace/dsh-plugins/skills` 单独 `git init`。
+`dsh-plugins/` 是一个**插件集合目录**，不是仓库：每个插件项目是它自己的子目录
+（`skill-mcp-panel/`、`loop-guard/`、`web-password-auth/`），各自带自己的 git
+仓库（`loop-guard` 暂无）；`skills/` 与它们并列，是独立内容。
+
+所以技能库不属于任何插件的仓库，要版本化就在
+`/home/sun/workspace/dsh-plugins/skills` 里单独 `git init`。

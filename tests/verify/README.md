@@ -14,7 +14,7 @@ contains a hash, so it is discovered by glob at runtime, never hard-coded.
 ## Run
 
 ```bash
-cd /home/sun/workspace/dsh-plugins
+cd /home/sun/workspace/dsh-plugins/skill-mcp-panel
 node tests/verify/run.mjs                  # every case, grouped
 node tests/verify/run.mjs f31 f33          # only named cases
 node tests/verify/run.mjs --list           # names only
