@@ -102,8 +102,8 @@ layer and therefore wins:
   config:
     providerName: nested-filesystem
     roots:
-      - ~/.agents/skills
-      - ~/.hermes/skills
+      - ~/workspace/dsh-plugins/skills   # this machine's library
+      - ~/.agents/skills                 # legacy root (symlink to ~/.hermes/skills)
       - ~/.dsh/skills
     maxDepth: 4
     rank: 300
@@ -120,13 +120,28 @@ layer and therefore wins:
 Runtime edits in **Settings → Plugins → Skills & MCP** need no restart and layer
 over both.
 
-### The restart matters
+### When a `lib/` change takes effect
 
-Module source is imported **once** and cached for the life of the process, and
-this profile ships `hmr` as `disabled: true`. A composition edit reloads only the
-row's **config** — the cached module callback is reused, so new *code* does not
-take effect. After changing `lib/`, restart the profile. Config and Settings-card
-changes are live and need no restart.
+Config and Settings-card changes are always live: they go through the settings
+provider, not through module loading, so they need no restart.
+
+Code is different. Node imports a module **once** and caches it for the life of
+the process, so a plain re-mount would reuse the old module body. Whether new
+code arrives without a restart depends on the profile's reload mode
+(`dsh.profile.patchReload` in `package.json`, plus the `hmr` row):
+
+- `patchReload: "live"` with the `hmr` row enabled — the default for the web
+  profile, whose launcher supplies `profileContext`. Editing the profile patch, or
+  a file below a linked package such as this one, triggers a recomposition that
+  **re-imports** the plugin module: the fix is live without restarting the service.
+  Verified on this machine by killing a mounted MCP child process and touching the
+  profile patch — the plugin was re-instantiated and re-mounted the server.
+- otherwise (headless/SDK/ACP bundles, or `hmr` disabled) — a composition edit
+  reloads only the row's **config** and reuses the cached module callback. After
+  changing `lib/`, restart the profile.
+
+This is a deployment property, not a plugin one: there is no plugin-side way to
+evict a module from Node's cache.
 
 ## Features
 
@@ -451,22 +466,36 @@ preset would make it visible only to sessions on that preset.
 
 ## Layout
 
+This folder is the local plugin workspace. The package at its root is
+`dsh-skill-mcp-panel`; the other entries are separate projects kept here so all
+locally developed plugins and the local skill library live in one place.
+
 ```
-package.json      the package MANIFEST: dsh.bundle.patch + dsh.client
-cordis.patch.yml  the BUNDLE LAYER: inserts this plugin's row (neutral defaults)
-lib/index.js      host half: the skill provider, settings namespace, wiring
-lib/toggle.js     suppression mechanics + read-back verdicts
-lib/state.js      the state document: skills, conflicts, roots, masking
-lib/http.js       the two management endpoints and their write gate
-lib/mcp.js        MCP server inventory, toggling and lifecycle
-lib/contract.js   frozen wire contract shared by every surface and the tests
-lib/client.js     browser half: the management page, registered into BOTH
-                  plugins.detail.section (Home → Plugins) and settings.plugins.tab
-locale/*.json     display title/description for the Plugins list (en + zh)
-icon.svg          the plugin icon shown in the Plugins list
-docs/             requirements, UX notes, the zh/en copy table, acceptance record
-tests/verify/     the independent adversarial acceptance suite
+package.json        the package MANIFEST: dsh.bundle.patch + dsh.client
+cordis.patch.yml    the BUNDLE LAYER: inserts this plugin's row (neutral defaults)
+lib/index.js        host half: the skill provider, settings namespace, wiring
+lib/toggle.js       suppression mechanics + read-back verdicts
+lib/state.js        the state document: skills, conflicts, roots, masking
+lib/http.js         the two management endpoints and their write gate
+lib/mcp.js          MCP server inventory, toggling and lifecycle
+lib/contract.js     frozen wire contract shared by every surface and the tests
+lib/client.js       browser half: the management page, registered into BOTH
+                    plugins.detail.section (Home → Plugins) and settings.plugins.tab
+locale/*.json       display title/description for the Plugins list (en + zh)
+icon.svg            the plugin icon shown in the Plugins list
+docs/               requirements, UX notes, the zh/en copy table, acceptance record
+tests/verify/       the independent adversarial acceptance suite
+
+skills/             the local SKILL LIBRARY (not part of this package; see
+                    docs/skills-layout.md). Git-ignored here on purpose.
+loop-guard/         a separate plugin project (own repository, own package)
+web-password-auth/  a separate plugin project (own repository, own package)
 ```
+
+`skills/`, `loop-guard/` and `web-password-auth/` are **not** shipped with this
+package: they are not listed in `files`, they are ignored by this repository, and
+the plugin never reads them as code. Pointing a profile at `skills/` is a
+machine-local configuration choice (`~/.dsh/profiles/web/cordis.patch.yml`).
 
 `lib/client.js` is a hand-written `window.__ModuleLoader__.load({ id, factory })`
 bundle (the format `tsdown` emits), so no build step is needed. **Its `id` must
@@ -562,8 +591,9 @@ Node.js ≥ 20.13 for `fs.watch(..., { recursive: true })`, plus
 Releases are semver and every released version has a `vX.Y.Z` git tag pointing at
 the exact commit; [CHANGELOG.md](CHANGELOG.md) records what changed.
 
-**Referenceable versions start at `1.4.0`.** Before that, this repository
-published some version numbers twice with different content:
+**Referenceable versions start at `1.4.0`; the current version is `1.4.1`.**
+Before `1.4.0`, this repository published some version numbers twice with
+different content:
 
 | version | commits | what differed |
 |---|---|---|

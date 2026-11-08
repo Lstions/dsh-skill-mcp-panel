@@ -129,6 +129,46 @@ const manager = createMcpManager({
 const stdioConfig = () => ({ transport: 'stdio', command: process.execPath, args: [FIXTURE], env: {}, cwd: '' })
 
 // ---------------------------------------------------------------------------
+section('restart: a persisted declaration comes back, and the switch can move')
+
+/**
+ * The state a host restart produces: a FRESH manager over declarations that are
+ * already persisted, with nothing mounted yet — no op has run in this process.
+ * This is the regression guard for the failure where the panel listed a server
+ * as enabled while no process existed and no tool was registered, and where the
+ * browser's own click rule then sent enabled:false for a row showing enabled,
+ * which answered 'already disabled' forever.
+ */
+{
+	const restartDeclared = [{ serverName: 'restart', enabled: true, config: stdioConfig() }]
+	const restartManager = createMcpManager({
+		ctx,
+		readDeclared: () => restartDeclared,
+		writeDeclared: (next) => { restartDeclared.splice(0, restartDeclared.length, ...next) }
+	})
+	check('restoreDeclared exists', typeof restartManager.restoreDeclared, 'function')
+	const outcomes = await restartManager.restoreDeclared()
+	check('restore mounted the persisted server', outcomes.map((item) => item.mounted), [true])
+	check('its tool reached the registry', ctx.get('tools').schemas().map((s) => s.name), ['mcp__restart__ping'])
+	const restored = await restartManager.describe()
+	check('phase is active after restore', restored.servers[0].phase, 'active')
+	check('toolCount is real, not inferred', restored.servers[0].toolCount, 1)
+
+	// The browser sends enabled: server.enabled === false, so a row showing enabled
+	// asks for false — and that must really disable rather than no-op.
+	const off = await restartManager.apply({ kind: OP.MCP_TOGGLE, serverName: 'restart', enabled: false })
+	check('a switch showing enabled really turns it off', off.status, STATUS.APPLIED)
+	check('the declaration was persisted as disabled', restartDeclared[0].enabled, false)
+	check('the tool left the registry', ctx.get('tools').schemas().length, 0)
+
+	// And the reverse direction restores it, so the row is not stuck either way.
+	const backOn = await restartManager.apply({ kind: OP.MCP_TOGGLE, serverName: 'restart', enabled: true })
+	check('turning it back on reconnects', backOn.status, STATUS.APPLIED)
+	check('the tool is registered again', ctx.get('tools').schemas().map((s) => s.name), ['mcp__restart__ping'])
+	await restartManager.dispose()
+}
+
+// ---------------------------------------------------------------------------
 section('live add: the server mounts and its tools reach the real registry')
 
 const added = await manager.apply({ kind: OP.MCP_ADD, serverName: 'live', config: stdioConfig() })
