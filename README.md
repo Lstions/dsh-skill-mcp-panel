@@ -240,12 +240,20 @@ sections:
   one switch.
 - **Conflicts** — every name claimed by more than one file, with the winner and
   all losers (path, root, provider, rank) and the policy in force.
-- **MCP servers** — every server from every layer, with transport, target, live
-  phase, tool count and registered tool names (counted from the real tool
-  registry, never inferred from configuration). Servers this plugin declared can
-  be added, edited, removed and toggled; rows from an outer layer can only be
-  toggled, and a row the harness itself manages is shown read-only with the
-  reason.
+- **MCP servers** — every server this **DSH composition** knows about: the ones
+  this plugin declared, plus any `@deepseek-ai/dsh-mcp-client` row an outer
+  Cordis layer inserted. Each row shows transport, target, live phase, tool count
+  and registered tool names (counted from the real tool registry, never inferred
+  from configuration). Servers this plugin declared can be added, edited,
+  removed and toggled; rows from an outer layer can only be toggled, and a row
+  the harness itself manages is shown read-only with the reason.
+
+  "Every layer" means **Cordis/DSH composition layers only** — bundle, profile,
+  preset, session plugin. This section is deliberately scoped to the harness: it
+  never reads another tool's MCP configuration, so servers defined for Codex
+  (`~/.codex/config.toml`), Claude, or any other client do not appear here even
+  when they run on the same machine. Add them here explicitly if DSH should use
+  them; each product keeps its own MCP registry.
 
   **Add server** opens a connection form whose fields follow the transport:
   `stdio` asks for `command`, `args` (one per line), `env` (`KEY=VALUE` per line)
@@ -597,7 +605,7 @@ Node.js ≥ 20.13 for `fs.watch(..., { recursive: true })`, plus
 Releases are semver and every released version has a `vX.Y.Z` git tag pointing at
 the exact commit; [CHANGELOG.md](CHANGELOG.md) records what changed.
 
-**Referenceable versions start at `1.4.0`; the current version is `1.4.3`.**
+**Referenceable versions start at `1.4.0`; the current version is `1.4.4`.**
 Before `1.4.0`, this repository published some version numbers twice with
 different content:
 
