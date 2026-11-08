@@ -14,10 +14,10 @@
  *        must equal what `ctx.skills.list()` actually resolves for that name.
  *        A conflict panel that disagrees with the registry is worse than none.
  */
-import { realpathSync, existsSync, lstatSync } from 'node:fs'
+import { realpathSync, existsSync, lstatSync, readdirSync } from 'node:fs'
 import { bootRealSkills, registerProvider, candidate, settle } from '../lib/real-harness.mjs'
 import { loadState, readStateSkills } from '../lib/plugin-under-test.mjs'
-import { runRealProvider } from '../lib/real-provider.mjs'
+import { runRealProvider, countSkillFiles } from '../lib/real-provider.mjs'
 
 const USER_ROOT = '/home/sun/.hermes/skills'
 const ALIAS_ROOT = '/home/sun/.agents/skills'
@@ -30,6 +30,11 @@ export async function run(report) {
   report.observe('alias root', `${ALIAS_ROOT} isSymbolicLink=${isLink} -> ${existsSync(ALIAS_ROOT) ? realpathSync(ALIAS_ROOT) : 'MISSING'}`)
   report.assert('precondition: the alias really is a symlink to the user root', isLink && realpathSync(ALIAS_ROOT) === realpathSync(USER_ROOT))
 
+  // The alias/identity proof needs a non-empty real tree: with zero skills the
+  // ratio "duplicates < skills" is 0 < 0 and says nothing. Blocked, not failed.
+  if (countSkillFiles(USER_ROOT) === 0) {
+    report.blocked(`${USER_ROOT} holds no SKILL.md, so the alias/conflict proof has no denominator`)
+  }
   const provider = await runRealProvider(
     [ALIAS_ROOT, USER_ROOT, '/home/sun/.dsh/skills'],
     { maxDepth: 4, includeHidden: false, duplicatePolicy: 'first-wins' },

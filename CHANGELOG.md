@@ -11,7 +11,8 @@
 
 | 版本 | 日期 | 提交 | 内容 |
 |---|---|---|---|
-| 1.4.2 | 2026-11-08 | 见下 | 源码移入插件集合目录的子目录；文档随之更新 |
+| 1.4.3 | 2026-11-08 | 见下 | 在 DSH 0.2.2-rc.1 上逐项验证；测试门禁不再依赖已删除的技能树 |
+| 1.4.2 | 2026-11-08 | `036e8fb` | 源码移入插件集合目录的子目录；文档随之更新 |
 | 1.4.1 | 2026-11-08 | `e4e215a` | 修复重启后已声明的 MCP 服务器不恢复、开关卡死 |
 | 1.4.0 | 2026-09-28 | `1c56d5b` | 支持 DSH 0.2.0；修正 peer 范围；新增兼容性门禁 |
 | 1.3.0 | 2026-09-22 | `48cc721` | 插件详情页注册；MCP 新增 / 修改 / 删除 |
@@ -41,6 +42,42 @@
 `test/version-check.mjs` 会阻止这件事再次发生：同一个版本号在下方出现两次即测试失败。
 
 ---
+
+## [1.4.3] - 2026-11-08
+
+### 兼容性验证（DSH 0.2.2-rc.1）
+
+在本机真实部署（DSH 0.2.2-rc.1 + Cordis 4.1.0）上逐项核对，未发现需要适配的
+API 变更，但验证过程本身暴露了三处**测试门禁**的问题，一并修掉：
+
+- `test/compat-check.mjs` 的已支持矩阵补入 `0.2.2-rc.1` 与 `0.2.2`。此前矩阵
+  停在 `0.2.0-rc.1`，虽然 peer 范围（`>=0.1.7-alpha.1 <0.3.0`）本来就能接受
+  0.2.2，但「已验证」这件事没有记录，下一个人无从判断。
+- `tests/verify/lib/real-harness.mjs`：`dsh-tool-skill` 在 0.2.2 的 `inject` 列表
+  里**新增了 `workingDirectory`**。缺这个服务时该插件根本不进入 apply()，
+  `ctx.tools.get('skill')` 恒为 `undefined`，于是 f31 / f3strategy / f3competitor /
+  f3cache 四条通过**真实 skill 工具**测量的用例全部报「工具没注册」——看起来像
+  API 不兼容，其实是脚手架少 provision 了一个服务。补上后四条全部通过。
+- 真实技能树的用例不再写死回答：本机 `~/.hermes/skills` 的 164 个技能已于
+  2026-11-07 被删除，而 `host-live.mjs` / `f44` / `scale` / `perf` 里写死的
+  「至少 100 个技能」「24 个分类」「恰好一处 github 冲突」在空树上必然失败。
+  `host-live.mjs` 改成**先统计磁盘上真实的 SKILL.md 数量**再按这个分母断言
+  （任何规模下都成立，并支持 `SKILL_MCP_PANEL_TEST_TREE` 指向别的树）；
+  另外三条在树为空时改为 `BLOCKED`——空树上的比例断言不构成任何证据。
+
+### 验证
+
+- `node test/all.mjs`：suites=14、failed=0、blocked=3（f44 / scale / perf，原因
+  是真实技能树为空，不是功能缺失）。
+- 真实部署上的功能实测：技能开关（勾选→`applied`→读回 `modelInvocable:false`
+  →恢复）、`config.set`/`config.unset` 写回 profile patch 且读回一致、
+  MCP 新增真 stdio 服务器（1 个工具 `mcp__compatprobe__ping` 进入注册表）→
+  关闭→删除（无残留子进程）、跨站 origin 与 text/plain 写入均 403、陈旧
+  revision 写入 409。
+- 浏览器实测（headless Chromium）：Settings → Built-in plugins → 「Skills & MCP」
+  渲染出两个技能根、12 个技能、devops/xag 分类、MCP 空态文案与全部发现设置项；
+  展开分类后 10 个 xag 技能逐个列出；点击技能开关返回 `Applied`；
+  「Add server」弹出 Transport / Command 表单；控制台无错误。
 
 ## [1.4.2] - 2026-11-08
 

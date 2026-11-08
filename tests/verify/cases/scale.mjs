@@ -23,7 +23,7 @@
  */
 import { readdirSync, statSync, readFileSync, realpathSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { runRealProvider } from '../lib/real-provider.mjs'
+import { runRealProvider, countSkillFiles } from '../lib/real-provider.mjs'
 
 const USER_ROOT = '/home/sun/.hermes/skills'
 const ALIAS_ROOT = '/home/sun/.agents/skills'
@@ -33,6 +33,14 @@ export const meta = { id: 'scale', requirement: 'F1 + F4', title: 'real-tree den
 export async function run(report) {
   if (!existsSync(USER_ROOT)) {
     report.blocked(`the user skill root ${USER_ROOT} does not exist on this machine`)
+  }
+  // The denominators below are this machine's real tree. When that tree has been
+  // emptied (the hermes skill collection was deleted on 2026-11-07) every ratio
+  // assertion would "fail" for a reason that has nothing to do with the plugin.
+  // A blocked case is not evidence of anything, which is the honest outcome.
+  const realSkillCount = countSkillFiles(USER_ROOT)
+  if (realSkillCount === 0) {
+    report.blocked(`${USER_ROOT} holds no SKILL.md; the denominators below would all be zero`)
   }
 
   // ---- 1. raw filesystem census -------------------------------------------

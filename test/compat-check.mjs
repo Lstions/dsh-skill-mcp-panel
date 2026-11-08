@@ -79,7 +79,15 @@ check('evaluatePluginCompatibility is exported', typeof evaluatePluginCompatibil
 // ── peer 范围必须覆盖插件实际支持的运行时 ────────────────────────────────
 // 这些是插件真正验证过、且 API 已逐项核对存在的版本。新增支持时在这里加一行；
 // 一个版本如果没验证过就不要写进来 —— 门禁宽于事实等于没有门禁。
-const SUPPORTED = ['0.1.7-alpha.1', '0.1.7-rc.2', '0.2.0-rc.1']
+//
+// 0.2.2-rc.1（2026-11-08 在真实部署上逐项核对）：
+//   ctx.skills.registerProvider(create) 的 create 仍收到 { signal, invalidate }；
+//   ctx.skills.list()/get()/snapshot() 未变；candidate 校验字段未变（SKILL_NAME 相同）；
+//   settings.configure() + settings/document-updated 仍是写路径，mutate(ns, ops) 未变；
+//   dsh-tool-skill 的 inject 列表 **新增了 workingDirectory**（见 tests/verify/lib/
+//   real-harness.mjs 的说明），这只影响在裸 Cordis 树里模拟宿主的测试脚手架，
+//   不影响插件本身；插件用到的 ctx.* 服务全部仍在。
+const SUPPORTED = ['0.1.7-alpha.1', '0.1.7-rc.2', '0.2.0-rc.1', '0.2.2-rc.1', '0.2.2']
 // 已知不支持：0.1.6 及更早用的是 installSection（0.1.7 已移除），0.3.0 尚未验证。
 const UNSUPPORTED = ['0.1.6-alpha.2', '0.3.0']
 

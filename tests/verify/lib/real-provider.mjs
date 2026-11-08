@@ -7,6 +7,8 @@
  * minimal one that captures the registered provider; this reuses that contract
  * instead of inventing a second, divergent fake.
  */
+import { readdirSync } from 'node:fs'
+import { join } from 'node:path'
 import { makeFsService, makeCtx } from '../../../test/harness.mjs'
 
 /**
@@ -90,4 +92,34 @@ export async function bootShippedPlugin(report, skillNames, disabled = []) {
     root: tree.root,
     cleanup: () => removeTree(tree.root),
   }
+}
+/**
+ * Count the \`SKILL.md\` files below one root, without following a skill directory
+ * further. Used by the real-tree cases to tell "the plugin found nothing" apart
+ * from "this machine has no tree to measure": the hermes skill collection was
+ * deleted on 2026-11-07, and every ratio assertion on an empty tree fails for a
+ * reason that has nothing to do with the code under test.
+ * @param {string} root - absolute root path.
+ * @returns {number} number of SKILL.md files reachable below it.
+ */
+export function countSkillFiles(root) {
+  let total = 0
+  const visit = (dir) => {
+    let entries
+    try {
+      entries = readdirSync(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
+    const hasSkill = entries.some((entry) => entry.isFile() && entry.name === 'SKILL.md')
+    if (hasSkill) {
+      total += 1
+      return
+    }
+    for (const entry of entries) {
+      if (entry.isDirectory()) visit(join(dir, entry.name))
+    }
+  }
+  visit(root)
+  return total
 }

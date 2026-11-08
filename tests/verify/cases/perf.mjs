@@ -16,8 +16,9 @@
  * Raw per-sample numbers are printed, not just the percentile: a P95 alone
  * cannot distinguish "consistently 40ms" from "two 900ms spikes".
  */
+import { existsSync, readdirSync } from 'node:fs'
 import { loadState, hasModule } from '../lib/plugin-under-test.mjs'
-import { runRealProvider } from '../lib/real-provider.mjs'
+import { runRealProvider, countSkillFiles } from '../lib/real-provider.mjs'
 import { createWebServerHarness, makeRequest } from '../lib/http-harness.mjs'
 import { loadHttp } from '../lib/plugin-under-test.mjs'
 import { registerProvider, bootRealSkills, candidate, settle } from '../lib/real-harness.mjs'
@@ -29,6 +30,12 @@ export const meta = { id: 'perf', requirement: 'N5', title: 'state endpoint P95 
 
 export async function run(report) {
   if (!hasModule('state.js')) report.blocked('N5: skill-mcp-panel/lib/state.js does not exist yet')
+  // N5 is a latency budget measured over the REAL catalog; an empty real tree
+  // makes the payload trivially fast, and the "payload really contains the full
+  // catalog" guard exists precisely to refuse that measurement. Blocked.
+  if (countSkillFiles('/home/sun/.hermes/skills') === 0) {
+    report.blocked('/home/sun/.hermes/skills holds no SKILL.md, so there is no real-scale payload to time')
+  }
 
   // Preferred measurement: the real HTTP handler, because that is what N5 names.
   if (hasModule('http.js')) {

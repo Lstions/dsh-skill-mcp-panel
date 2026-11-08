@@ -111,8 +111,12 @@ export function settle(ms = 40) {
  * longer load it" is measured by the actual consumer instead of by a
  * transcribed approximation.
  *
- * `dsh-tools` needs `systemPrompt`, and `dsh-tool-skill` needs `agents`; both
- * are stubbed narrowly, because neither participates in the decision under test.
+ * `dsh-tools` needs `systemPrompt`; `dsh-tool-skill` needs `agents` and, since
+ * DSH 0.2.2, `workingDirectory` (it participates in the plugin's inject list, so a
+ * missing service means the plugin never reaches apply() and the tool silently
+ * does not register — the failure looks like an API break, so the stub is
+ * asserted below rather than assumed). None of the three participates in the
+ * decision under test.
  * @returns {{ctx: object, tools: object[], call: Function, dispose: Function}}
  */
 export async function bootRealSkillTool() {
@@ -123,6 +127,10 @@ export async function bootRealSkillTool() {
   const ctx = new cordis.Context()
   ctx.provide('systemPrompt', { tools: () => {}, section: () => () => {} })
   ctx.provide('agents', { get: () => undefined, list: () => [], on: () => () => {} })
+  // Present in dsh-tool-skill's inject list since 0.2.2. Without it the plugin
+  // never applies, ctx.tools.get('skill') stays undefined, and every case that
+  // measures through the real tool fails for a harness reason, not a product one.
+  ctx.provide('workingDirectory', { get: () => process.cwd(), on: () => () => {}, set: () => {} })
   ctx.plugin(skill.default ?? skill)
   ctx.plugin(toolsMod.default ?? toolsMod)
   await settle(90)

@@ -332,19 +332,54 @@ const modelNames = async (booted) =>
   await ctx.fiber.dispose()
 }
 
-// ── 7. REAL TREE: scale, correctness and latency at production size ───────
-// The denominator is stated explicitly, and the same scan is repeated through
-// the endpoint so the P95 below is measured on the real payload.
+// ── 7. REAL TREE: correctness and latency at whatever size this machine has ─
+// The expectations are DERIVED from a local census of the same tree, never from
+// a number that used to be true here: this machine's original 164-skill hermes
+// collection was deleted on 2026-11-07, and hard-coded denominators
+// ("more than 100 skills", "24 categories", "exactly one conflict") turned every
+// later run into a red that said nothing about the plugin.
+//
+// The tree is taken from SKILL_MCP_PANEL_TEST_TREE when set (so the section can
+// be pointed at a large collection), then the configured machine root
+// (/home/sun/workspace/dsh-plugins/skills), then the legacy ~/.agents/skills.
 {
-  const realRoot = join(homedir(), '.agents', 'skills')
-  let usable = true
-  try {
-    await readdir(realRoot)
-  } catch {
-    usable = false
+  const candidates = [
+    process.env.SKILL_MCP_PANEL_TEST_TREE,
+    '/home/sun/workspace/dsh-plugins/skills',
+    join(homedir(), '.agents', 'skills'),
+  ].filter((entry) => typeof entry === 'string' && entry !== '')
+
+  const census = async (root) => {
+    const walk = async (dir) => {
+      let entries
+      try {
+        entries = await readdir(dir, { withFileTypes: true })
+      } catch {
+        return 0
+      }
+      if (entries.some((entry) => entry.isFile() && entry.name === 'SKILL.md')) return 1
+      let total = 0
+      for (const entry of entries) {
+        if (entry.isDirectory()) total += await walk(join(dir, entry.name))
+      }
+      return total
+    }
+    return walk(root)
   }
-  if (!usable) {
-    console.log(`SKIP  real-tree scale: ${realRoot} is not readable on this machine`)
+
+  let realRoot
+  let expected = 0
+  for (const candidate of candidates) {
+    const found = await census(candidate)
+    if (found > 0) {
+      realRoot = candidate
+      expected = found
+      break
+    }
+  }
+
+  if (realRoot === undefined) {
+    console.log('SKIP  real-tree scale: no configured root holds a SKILL.md on this machine')
   } else {
     const booted = await boot([realRoot], { maxDepth: 6 })
     // Warm the caches the endpoint relies on, then measure.
@@ -353,8 +388,8 @@ const modelNames = async (booted) =>
 
     const skills = warm.body.skills
     const categories = new Set(skills.map((s) => s.category).filter((c) => c !== ''))
-    console.log(`\n  REAL TREE — root ${realRoot} (symlink to ${await realpath(realRoot)})`)
-    console.log(`  skills=${skills.length}  categories=${categories.size}  conflicts=${warm.body.conflicts.length}`)
+    console.log(`\n  REAL TREE — root ${realRoot} (${await realpath(realRoot)})`)
+    console.log(`  census=${expected} SKILL.md  skills=${skills.length}  categories=${categories.size}  conflicts=${warm.body.conflicts.length}`)
     console.log(`  roots=${JSON.stringify(warm.body.roots)}`)
     console.log(`  errors=${warm.body.errors.length}  mcp.servers=${warm.body.mcp.servers.length}`)
     if (warm.body.conflicts.length > 0) {
@@ -364,11 +399,11 @@ const modelNames = async (booted) =>
       }
     }
 
-    checkTrue('the real tree yields a substantial catalog', skills.length > 100)
-    check('the real tree yields 24 categories', categories.size, 24)
-    check('the real tree yields exactly one conflict (github)', warm.body.conflicts.map((c) => c.name), ['github'])
+    // The denominator is the census, so this holds at any tree size: every
+    // SKILL.md on disk must appear once, and nothing may be invented.
+    check(`all ${expected} SKILL.md files are discovered exactly once`, skills.length, expected)
     check('no discovery errors on the real tree', warm.body.errors, [])
-    checkTrue('the symlinked root is reported as existing', warm.body.roots.every((r) => r.exists))
+    checkTrue('the real root is reported as existing', warm.body.roots.every((r) => r.exists))
 
     // Every reported conflict winner must match the live registry exactly.
     const live = new Map((await booted.ctx.skills.list()).map((s) => [s.name, s]))
