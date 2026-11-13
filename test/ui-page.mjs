@@ -881,6 +881,18 @@ function makeLocale(active = 'en') {
   const submitEmpty = buttons(page.tree).find((n) => textOf(n) === 'Add' && n.props.disabled !== undefined)
   check('Add is disabled while the name is empty', submitEmpty?.props.disabled, true)
 
+  // 取消必须随时可用：表单打开时名字还是空的，如果把这个"未填名字"也当成 busy，
+  // 取消按钮会跟着被禁用，用户就被困在表单里（用户报的正是这个）。
+  const cancel = buttons(page.tree).find((n) => textOf(n) === 'Cancel')
+  check('the new-server form can be cancelled before a name is typed', cancel?.props.disabled, false)
+  cancel.props.onClick()
+  await page.settle()
+  check('cancelling closes the new-server form', inputs(page.tree).some((n) => n.props.id === 'skill-mcp-panel-mcp-new-name'), false)
+  const reopen = buttons(page.tree).find((n) => textOf(n) === 'Add server')
+  check('the Add server entry is available again after cancelling', reopen !== undefined, true)
+  reopen.props.onClick()
+  await page.settle()
+
   const name = inputs(page.tree).find((n) => n.props.id === 'skill-mcp-panel-mcp-new-name')
   name.props.onChange({ target: { value: 'fixture' } })
   await page.settle()
