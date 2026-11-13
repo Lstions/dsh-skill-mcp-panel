@@ -303,6 +303,50 @@ const modelNames = async (booted) =>
     ['bing-search', 'playwright'],
   )
 
+  // Step one of the page flow: a preview answers per server and writes nothing.
+  const beforePreview = writes.length
+  const preview = await booted.request(ROUTE_APPLY, {
+    method: 'POST',
+    headers: booted.writeHeaders(),
+    body: JSON.stringify({
+      ops: [{ kind: 'mcp.preview', json: JSON.stringify({ mcpServers: { reviewed: { command: 'npx', args: ['-y', 'x'] } } }) }],
+    }),
+  })
+  check('preview answers per server', preview.body.results.length, 1)
+  check('preview proposes the document key', preview.body.results[0].preview.serverName, 'reviewed')
+  check('preview performs no settings write', writes.length, beforePreview)
+  check('preview declares nothing', preview.body.state.mcp.servers.some((server) => server.serverName === 'reviewed'), false)
+
+  // Step two: the reviewed list carries the name and note the user confirmed.
+  const reviewed = await booted.request(ROUTE_APPLY, {
+    method: 'POST',
+    headers: booted.writeHeaders(),
+    body: JSON.stringify({
+      ops: [
+        {
+          kind: 'mcp.import',
+          entries: [
+            {
+              serverName: 'renamed-search',
+              note: '内网搜索',
+              config: { transport: 'stdio', command: 'npx', args: ['-y', 'bing-cn-mcp'], env: {}, cwd: '' },
+              enabled: false,
+            },
+          ],
+        },
+      ],
+    }),
+  })
+  check('a reviewed entry is imported', reviewed.body.results[0].status, STATUS.APPLIED)
+  check('the reviewed name is used verbatim', reviewed.body.results[0].target, 'renamed-search')
+  const reviewedRow = reviewed.body.state.mcp.servers.find((server) => server.serverName === 'renamed-search')
+  check('the note is echoed in the state', reviewedRow?.note, '内网搜索')
+  check(
+    'the note reached the settings document',
+    booted.settings.resolved().mcpServers.find((entry) => entry.serverName === 'renamed-search')?.note,
+    '内网搜索',
+  )
+
   // Re-importing the same document is a no-op, honestly reported.
   const beforeRepeat = writes.length
   const again = await booted.request(ROUTE_APPLY, {

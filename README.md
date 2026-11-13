@@ -242,9 +242,9 @@ sections:
   all losers (path, root, provider, rank) and the policy in force.
 - **MCP servers** — every server this **DSH composition** knows about: the ones
   this plugin declared, plus any `@deepseek-ai/dsh-mcp-client` row an outer
-  Cordis layer inserted. Each row shows transport, target, live phase, tool count
-  and registered tool names (counted from the real tool registry, never inferred
-  from configuration). Servers this plugin declared can be added, edited,
+  Cordis layer inserted. Each row shows transport, target, the user's note, live
+  phase, tool count and registered tool names (counted from the real tool
+  registry, never inferred from configuration). Servers this plugin declared can be added, edited,
   removed and toggled; rows from an outer layer can only be toggled, and a row
   the harness itself manages is shown read-only with the reason.
 
@@ -281,6 +281,16 @@ sections:
   `type: "http"` as an alias for `streamable-http`. **`sse` is refused**, because
   this host has no SSE transport and accepting it would only move the failure to
   connection time. `disabled: true` declares a server without connecting it.
+
+  **Pasting is two steps.** The document is parsed on the host and shown as one
+  row per server with its **name (required, editable)** and **note (optional)**;
+  nothing is written and no process starts until **Import** is pressed. A raw
+  server object — `{ "command": "npx", "args": [...] }` with no wrapper — is
+  accepted exactly for this step: it has no name to import under, so the review
+  asks for one instead of inventing `server-1`. The name is what the
+  `mcp__<name>__` tool prefix is built from, and the note is what keeps two
+  similar servers apart in the list. Both are stored with the declaration and
+  remain editable through **Edit**.
 
   The whole document is written in **one** settings write, and each server gets
   its own result — a bad name refuses only itself, and the page lists every row
@@ -452,24 +462,35 @@ Every write is fenced:
   content type without a preflight it will not pass.
 - **`writeAccess`** may be tightened to `loopback` in configuration.
 
-The MCP operations are `mcp.toggle`, `mcp.add`, `mcp.configure`, `mcp.import`
-and `mcp.remove`. `mcp.import` is the only kind that answers with **more than
-one result** — one per server in the pasted document, in document order — and
-it accepts either the raw text under `json` or an already-parsed map under
-`servers`, so a script can use the same path the page uses:
+The MCP operations are `mcp.toggle`, `mcp.add`, `mcp.configure`,
+`mcp.preview`, `mcp.import` and `mcp.remove`. Two kinds answer with **more than
+one result**, one per server in document order: `mcp.preview` (what would be
+imported — nothing is written) and `mcp.import` (what was imported).
+
+`mcp.preview`, and the document form of `mcp.import`, take the raw text under
+`json` or an already-parsed map under `servers`. The reviewed form — what the
+page sends after the user confirms names and notes — takes `entries`:
 
 ```json
 {
   "ops": [
     {
       "kind": "mcp.import",
-      "servers": {
-        "playwright": { "command": "npx", "args": ["@playwright/mcp@latest", "--headless"] }
-      }
+      "entries": [
+        {
+          "serverName": "playwright",
+          "note": "headless browser",
+          "config": { "transport": "stdio", "command": "npx", "args": ["@playwright/mcp@latest", "--headless"] },
+          "enabled": true
+        }
+      ]
     }
   ]
 }
 ```
+
+A name is required in an entry and a nameless one is refused rather than given a
+generated name; `note` is optional and bounded to 200 characters.
 
 ### Security — stated plainly
 
@@ -501,7 +522,7 @@ All fields are optional. Any invalid value throws at mount, naming the field.
 | `watchDebounceMs` | `250` | Debounce before a change refreshes the catalog. |
 | `duplicatePolicy` | `first-wins` | `first-wins` keeps the first root's file; `error` withholds the name entirely. |
 | `skills` | `{}` | Per-skill switches, written by the management page. |
-| `mcpServers` | `[]` | MCP servers this plugin declares and owns. |
+| `mcpServers` | `[]` | MCP servers this plugin declares and owns; each entry is `{ serverName, config, enabled, note? }`, where `note` is the user's own list remark and never reaches the MCP client. |
 | `writeAccess` | `same-origin` | `same-origin` or the stricter `loopback`. |
 
 ## Where this row belongs
@@ -659,7 +680,7 @@ Node.js ≥ 20.13 for `fs.watch(..., { recursive: true })`, plus
 Releases are semver and every released version has a `vX.Y.Z` git tag pointing at
 the exact commit; [CHANGELOG.md](CHANGELOG.md) records what changed.
 
-**Referenceable versions start at `1.4.0`; the current version is `1.5.0`.**
+**Referenceable versions start at `1.4.0`; the current version is `1.6.0`.**
 Before `1.4.0`, this repository published some version numbers twice with
 different content:
 

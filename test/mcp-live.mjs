@@ -348,6 +348,21 @@ section('live import: a pasted document mounts a real child process')
 	check('a repeated import is unchanged', again.map((result) => result.status), [STATUS.UNCHANGED, STATUS.UNCHANGED])
 	check('a repeated import declared nothing new', declared.length, before + 2)
 
+	// The reviewed path (what the page sends) carries the confirmed name and note.
+	const reviewedImport = await manager.apply({
+		kind: OP.MCP_IMPORT,
+		entries: [{ serverName: 'pasted-three', note: '真实子进程', config: stdioConfig(), enabled: true }]
+	})
+	check('a reviewed entry is imported live', reviewedImport[0].status, STATUS.APPLIED)
+	check('its tool really registered', Boolean(ctx.get('tools').get('mcp__pasted-three__ping')), true)
+	const withNote = await manager.describe()
+	check(
+		'the note is reported by describe',
+		withNote.servers.find((server) => server.serverName === 'pasted-three').note,
+		'真实子进程'
+	)
+	await manager.apply({ kind: OP.MCP_REMOVE, serverName: 'pasted-three' })
+
 	const cleanupLive = await manager.apply({ kind: OP.MCP_REMOVE, serverName: 'pasted-one' })
 	check('the imported server can be removed', cleanupLive.status, STATUS.APPLIED)
 	check('its tool left the registry', ctx.get('tools').schemas().some((s) => s.name.startsWith('mcp__pasted-one__')), false)

@@ -10,7 +10,16 @@
  *
  * Usage: node test/mcp-inventory.mjs
  */
-import { createMcpManager, normalizeConfig, describeTarget, redactUrl, parseMcpServers, SERVER_NAME_PATTERN } from '../lib/mcp.js'
+import {
+	createMcpManager,
+	normalizeConfig,
+	normalizeNote,
+	describeTarget,
+	redactUrl,
+	parseMcpServers,
+	NOTE_MAX_LENGTH,
+	SERVER_NAME_PATTERN
+} from '../lib/mcp.js'
 import { OP, STATUS, SECRET_MASK } from '../lib/contract.js'
 
 let failures = 0
@@ -531,6 +540,9 @@ section('removal refuses an outer row and accepts a declared one')
 // ---------------------------------------------------------------------------
 section('JSON import: documents copied out of other MCP clients')
 
+/** One entry is importable when it has a usable config and a legal, present name. */
+const importable = (entry) => entry.config !== null && entry.nameError === null && entry.serverName !== null
+
 {
 	// The exact shape a user copies from Claude Desktop / Cursor / Claude Code.
 	const document = JSON.stringify({
@@ -540,42 +552,51 @@ section('JSON import: documents copied out of other MCP clients')
 		}
 	})
 	const parsed = parseMcpServers(document)
-	check('both servers are parsed', parsed.servers.map((server) => server.serverName), ['bing-search', 'playwright'])
-	check('the first is normalised to stdio', parsed.servers[0].config, {
+	check('both servers are parsed', parsed.entries.map((entry) => entry.serverName), ['bing-search', 'playwright'])
+	check('the first is normalised to stdio', parsed.entries[0].config, {
 		transport: 'stdio',
 		command: 'npx',
 		args: ['-y', 'bing-cn-mcp'],
 		env: {},
 		cwd: ''
 	})
-	check('the second keeps its flags', parsed.servers[1].config.args, ['@playwright/mcp@latest', '--headless'])
-	check('no errors are reported', parsed.errors, [])
+	check('the second keeps its flags', parsed.entries[1].config.args, ['@playwright/mcp@latest', '--headless'])
+	check('neither entry carries an error', parsed.entries.map((entry) => entry.configError ?? entry.nameError), [null, null])
 	check('entries preserve document order', parsed.entries.map((entry) => entry.serverName), ['bing-search', 'playwright'])
 }
 
 {
-	// VS Code (`servers`) plus the `http` type spelling.
+	// Wrapper variants and transport aliases.
 	const vscode = parseMcpServers({
 		servers: {
 			remote: { type: 'http', url: 'https://mcp.example.test/mcp', headers: { Authorization: 'Bearer x' } }
 		}
 	})
-	check('the "servers" wrapper is accepted', vscode.servers[0].serverName, 'remote')
-	check('type "http" maps onto streamable-http', vscode.servers[0].config.transport, 'streamable-http')
-	check('a header survives the import', vscode.servers[0].config.headers, { Authorization: 'Bearer x' })
+	check('the "servers" wrapper is accepted', vscode.entries[0].serverName, 'remote')
+	check('type "http" maps onto streamable-http', vscode.entries[0].config.transport, 'streamable-http')
+	check('a header survives the import', vscode.entries[0].config.headers, { Authorization: 'Bearer x' })
 
 	const bare = parseMcpServers({ plain: { command: 'node', args: 'server.mjs' } })
-	check('a bare name map is accepted', bare.servers[0].serverName, 'plain')
-	check('a single string arg is wrapped', bare.servers[0].config.args, ['server.mjs'])
+	check('a bare name map is accepted', bare.entries[0].serverName, 'plain')
+	check('a single string arg is wrapped', bare.entries[0].config.args, ['server.mjs'])
 
 	const typed = parseMcpServers({ local: { type: 'stdio', command: 'node' } })
-	check('an explicit stdio type is honoured', typed.servers[0].config.transport, 'stdio')
-	check('omitted args default to an empty list', typed.servers[0].config.args, [])
+	check('an explicit stdio type is honoured', typed.entries[0].config.transport, 'stdio')
+	check('omitted args default to an empty list', typed.entries[0].config.args, [])
 
-	// A remote entry without a type is inferred from `url`, which is what
-	// Cursor documents rely on.
 	const inferred = parseMcpServers({ cursorish: { url: 'https://c.test/mcp' } })
-	check('a url-only entry is inferred as streamable-http', inferred.servers[0].config.transport, 'streamable-http')
+	check('a url-only entry is inferred as streamable-http', inferred.entries[0].config.transport, 'streamable-http')
+}
+
+{
+	// A RAW server object — the case the review step exists for: it has no name,
+	// and the name is what the `mcp__<name>__` namespace will be built from.
+	const raw = parseMcpServers({ command: 'npx', args: ['-y', 'playwright'] })
+	check('a raw server object parses to one entry', raw.entries.length, 1)
+	check('the raw entry has no name', raw.entries[0].serverName, null)
+	check('the raw entry still yields its config', raw.entries[0].config.command, 'npx')
+	check('missing a name is not a parse error by itself', raw.entries[0].configError, null)
+	check('the raw entry is not importable without a name', importable(raw.entries[0]), false)
 }
 
 {
@@ -584,9 +605,9 @@ section('JSON import: documents copied out of other MCP clients')
 		off2: { command: 'node', enabled: false },
 		on: { command: 'node' }
 	})
-	check('disabled:true declares the server disabled', off.servers[0].enabled, false)
-	check('enabled:false declares the server disabled', off.servers[1].enabled, false)
-	check('an entry without a flag is enabled', off.servers[2].enabled, true)
+	check('disabled:true declares the server disabled', off.entries[0].enabled, false)
+	check('enabled:false declares the server disabled', off.entries[1].enabled, false)
+	check('an entry without a flag is enabled', off.entries[2].enabled, true)
 }
 
 {
@@ -596,7 +617,6 @@ section('JSON import: documents copied out of other MCP clients')
 		['malformed JSON', '{"mcpServers": ', /not valid JSON/],
 		['two documents pasted in a row', '{"mcpServers": {}}\n{"mcpServers": {}}', /one document at a time/],
 		['an array', '[{"name":"x"}]', /not an array/],
-		['a server without a name', { command: 'npx' }, /server name is required/],
 		['an empty map', { mcpServers: {} }, /no servers were found/],
 		['a wrapper that is not an object', { mcpServers: [] }, /"mcpServers" must be an object/],
 		['an illegal name', { 'bad.name': { command: 'npx' } }, /not a valid serverName/],
@@ -609,21 +629,23 @@ section('JSON import: documents copied out of other MCP clients')
 	]
 	for (const [label, input, pattern] of cases) {
 		const parsed = parseMcpServers(input)
-		check(`${label}: refused`, parsed.servers.length === 0 && parsed.errors.length === 1, true)
-		check(`${label}: the reason is actionable`, pattern.test(parsed.errors[0]?.error ?? ''), true)
+		check(`${label}: nothing importable`, parsed.entries.every((entry) => !importable(entry)), true)
+		const problem = parsed.entries.map((entry) => entry.configError ?? entry.nameError ?? '').join(' ')
+		check(`${label}: the reason is actionable`, pattern.test(problem), true)
 	}
 }
 
 {
-	// Partial success is deliberate: one bad key must not discard the good ones.
+	// One bad key must not discard the good ones, and the name error stays on the
+	// entry it belongs to — that is what lets the review step show it in place.
 	const mixed = parseMcpServers({ good: { command: 'node' }, 'bad name': { command: 'node' } })
-	check('a valid entry survives a sibling error', mixed.servers.map((server) => server.serverName), ['good'])
-	check('the bad entry is reported by name', mixed.errors[0].serverName, 'bad name')
+	check('a valid entry survives a sibling error', mixed.entries.filter(importable).map((entry) => entry.serverName), ['good'])
+	check('the bad name is reported on its own entry', mixed.entries[1].nameError.includes('not a valid serverName'), true)
 	check('entries keep document order', mixed.entries.map((entry) => entry.serverName), ['good', 'bad name'])
 }
 
 // ---------------------------------------------------------------------------
-section('JSON import: one persist, one result per server, honest statuses')
+section('JSON import: preview, one persist, one result per server, honest statuses')
 
 /** A mount that publishes the same one tool per server, so no wait is needed. */
 function mountPublishesOneTool(config, tools, registered) {
@@ -633,6 +655,7 @@ function mountPublishesOneTool(config, tools, registered) {
 }
 
 {
+	// The direct document path: names come from the document, nothing is reviewed.
 	const tools = makeTools([])
 	const { manager, state, getLastWrite } = makeManager({
 		tools,
@@ -659,6 +682,97 @@ function mountPublishesOneTool(config, tools, registered) {
 	const inventory = await manager.describe()
 	check('imported servers appear in the inventory', inventory.servers.map((server) => server.serverName), ['bing-search', 'playwright'])
 	check('the imported servers are declared', inventory.servers.every((server) => server.declared === true), true)
+	check('a document import stores no note', inventory.servers[0].note, '')
+}
+
+{
+	// A raw document has no name, and the headless import path must say so
+	// instead of guessing one.
+	const { manager, getLastWrite } = makeManager({ tools: makeTools([]), loader: makeLoader([]) })
+	const results = await manager.apply({ kind: OP.MCP_IMPORT, json: { command: 'npx', args: ['-y', 'playwright'] } })
+	check('an unnamed raw document is refused', results[0].status, STATUS.REFUSED)
+	check('the refusal asks for a name', results[0].detail.includes('no name'), true)
+	check('an unnamed raw document wrote nothing', getLastWrite(), undefined)
+}
+
+{
+	// Preview: the page's first step. It must report names/configs and write
+	// absolutely nothing — including for entries that cannot be imported.
+	const { manager, getLastWrite, state } = makeManager({ tools: makeTools([]), loader: makeLoader([]) })
+	const preview = await manager.apply({
+		kind: OP.MCP_PREVIEW,
+		json: { mcpServers: { good: { command: 'node' }, 'bad.name': { command: 'node' } } }
+	})
+	check('preview answers per entry', preview.length, 2)
+	check('preview proposes the document key', preview[0].preview.serverName, 'good')
+	check('preview carries the parsed config', preview[0].preview.config.command, 'node')
+	check('preview flags a bad name without dropping the entry', preview[1].preview.nameError.includes('not a valid serverName'), true)
+	check('preview writes no declaration', state.declared.length, 0)
+	check('preview performs no settings write', getLastWrite(), undefined)
+	check('preview is not reported as applied', preview.every((result) => result.ok === false), false)
+
+	const rawPreview = await manager.apply({ kind: OP.MCP_PREVIEW, json: { command: 'node', args: ['srv.mjs'] } })
+	check('preview handles a raw unnamed entry', rawPreview[0].preview.serverName, null)
+	check('preview still shows the raw entry config', rawPreview[0].preview.config.args, ['srv.mjs'])
+}
+
+{
+	// The reviewed path: the page sends the names and notes the user confirmed.
+	const tools = makeTools([])
+	const { manager, state } = makeManager({ tools, loader: makeLoader([]), onMount: mountPublishesOneTool })
+	const results = await manager.apply({
+		kind: OP.MCP_IMPORT,
+		entries: [
+			{ serverName: 'fast-search', note: ' 国内必应 ', config: { transport: 'stdio', command: 'npx', args: ['-y', 'bing-cn-mcp'] }, enabled: true },
+			{ serverName: 'offline', note: '', config: { transport: 'stdio', command: 'node' }, enabled: false }
+		]
+	})
+	check('both reviewed entries are applied', results.map((result) => result.status), [STATUS.APPLIED, STATUS.APPLIED])
+	check('the reviewed name is stored', state.declared.map((item) => item.serverName), ['fast-search', 'offline'])
+	check('the note is stored trimmed', state.declared[0].note, '国内必应')
+	check('the reviewed entry can be disabled', state.declared[1].enabled, false)
+	const inventory = await manager.describe()
+	check('the note appears in the inventory', inventory.servers.find((server) => server.serverName === 'fast-search').note, '国内必应')
+}
+
+{
+	// A reviewed entry with no name must not be invented a name.
+	const { manager, getLastWrite } = makeManager({ tools: makeTools([]), loader: makeLoader([]) })
+	const results = await manager.apply({
+		kind: OP.MCP_IMPORT,
+		entries: [{ serverName: '', config: { transport: 'stdio', command: 'node' } }]
+	})
+	check('a nameless reviewed entry is refused', results[0].status, STATUS.REFUSED)
+	check('the refusal says a name is required', results[0].detail.includes('a name is required'), true)
+	check('a nameless reviewed entry wrote nothing', getLastWrite(), undefined)
+}
+
+{
+	// Two rows can end up with the same edited name; the store is keyed by name.
+	const { manager, getLastWrite } = makeManager({ tools: makeTools([]), loader: makeLoader([]), onMount: mountPublishesOneTool })
+	const results = await manager.apply({
+		kind: OP.MCP_IMPORT,
+		entries: [
+			{ serverName: 'same', config: { transport: 'stdio', command: 'node' } },
+			{ serverName: 'same', config: { transport: 'stdio', command: 'node' } }
+		]
+	})
+	check('the first use of a name is accepted', results[0].status, STATUS.APPLIED)
+	check('a repeated name in one batch is refused', results[1].status, STATUS.REFUSED)
+	check('the refusal points at the duplicate', results[1].detail.includes('more than once'), true)
+	check('only one declaration was written', getLastWrite().length, 1)
+}
+
+{
+	// Notes are management metadata, so they are bounded and validated.
+	const { manager, getLastWrite } = makeManager({ tools: makeTools([]), loader: makeLoader([]) })
+	const results = await manager.apply({
+		kind: OP.MCP_IMPORT,
+		entries: [{ serverName: 'n', note: 'x'.repeat(NOTE_MAX_LENGTH + 1), config: { transport: 'stdio', command: 'node' } }]
+	})
+	check('an over-long note is refused', results[0].status, STATUS.REFUSED)
+	check('the note limit is stated', results[0].detail.includes(String(NOTE_MAX_LENGTH)), true)
+	check('nothing was written for an invalid note', getLastWrite(), undefined)
 }
 
 {
@@ -720,16 +834,35 @@ function mountPublishesOneTool(config, tools, registered) {
 }
 
 {
-	// The batch contract stays flat: an import contributes its results in place.
+	// The batch contract stays flat: a preview or an import contributes its
+	// results in place.
 	const { manager } = makeManager({ tools: makeTools([]), loader: makeLoader([]), onMount: mountPublishesOneTool })
 	const batch = await manager.applyBatch([
-		{ kind: OP.MCP_IMPORT, json: { one: { command: 'node' }, two: { command: 'node' } } },
+		{ kind: OP.MCP_PREVIEW, json: { one: { command: 'node' }, two: { command: 'node' } } },
+		{ kind: OP.MCP_IMPORT, entries: [{ serverName: 'one', config: { transport: 'stdio', command: 'node' } }] },
 		{ kind: 'mcp.nonsense' }
 	])
-	check('an import contributes one result per server', batch.length, 3)
-	check('the results are the import ones', batch.slice(0, 2).map((result) => result.target), ['one', 'two'])
-	check('the following op still gets its own result', batch[2].kind, 'mcp.nonsense')
+	check('a preview contributes one result per server', batch.slice(0, 2).map((result) => result.kind), [OP.MCP_PREVIEW, OP.MCP_PREVIEW])
+	check('the import contributes its own result', batch[2].kind, OP.MCP_IMPORT)
+	check('the following op still gets its own result', batch[3].kind, 'mcp.nonsense')
 }
+
+{
+	// Notes on add / configure: stored trimmed, kept when omitted, cleared when
+	// explicitly emptied.
+	const { manager, state } = makeManager({ tools: makeTools([]), loader: makeLoader([]), onMount: mountPublishesOneTool })
+	await manager.apply({ kind: OP.MCP_ADD, serverName: 'noted', note: '  运维用 ', config: { transport: 'stdio', command: 'node' }, enabled: false })
+	check('add stores the trimmed note', state.declared[0].note, '运维用')
+	check('the note is surfaced in the inventory', (await manager.describe()).servers[0].note, '运维用')
+	await manager.apply({ kind: OP.MCP_CONFIGURE, serverName: 'noted', config: { transport: 'stdio', command: 'node', args: [] }, note: '改了' })
+	check('configure updates the note', state.declared[0].note, '改了')
+	await manager.apply({ kind: OP.MCP_CONFIGURE, serverName: 'noted', config: { transport: 'stdio', command: 'node', args: [] } })
+	check('an omitted note is kept, not wiped', state.declared[0].note, '改了')
+	await manager.apply({ kind: OP.MCP_CONFIGURE, serverName: 'noted', config: { transport: 'stdio', command: 'node', args: [] }, note: '' })
+	check('an explicit empty note clears it', state.declared[0].note, '')
+}
+
+
 
 // ---------------------------------------------------------------------------
 section('pure helpers')
@@ -751,6 +884,14 @@ section('pure helpers')
 		['one']
 	)
 	check('normalizeConfig rejects a bad timeout', normalizeConfig({ transport: 'stdio', command: 'n', toolCallTimeoutMs: -5 }).error !== null, true)
+	check('normalizeNote trims the note', normalizeNote('  内网  ').note, '内网')
+	check('normalizeNote treats an absent note as empty', normalizeNote(undefined).note, '')
+	check('normalizeNote rejects a non-string note', normalizeNote(5).error !== null, true)
+	check(
+		'normalizeNote bounds the length',
+		normalizeNote('x'.repeat(NOTE_MAX_LENGTH + 1)).error.includes(String(NOTE_MAX_LENGTH)),
+		true
+	)
 }
 
 console.log(`\n${failures === 0 ? 'ALL PASSED' : `${failures} CHECK(S) FAILED`}`)
