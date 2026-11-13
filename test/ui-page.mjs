@@ -255,7 +255,7 @@ function makeState(overrides = {}) {
     errors: ['root /gone: not a directory'],
     mcp: {
       servers: [
-        { rowId: 'r1', serverName: 'github', transport: 'stdio', target: 'npx gh', enabled: true, declared: true, note: '公司 GitHub', phase: 'active', toolCount: 2, tools: [{ name: 'mcp__github__a', description: 'a' }], addressable: true, readOnlyReason: null, editable: true, config: { env: { GITHUB_TOKEN: '••••••' } } },
+        { rowId: 'r1', serverName: 'github', transport: 'stdio', target: 'npx gh', enabled: true, declared: true, note: '公司 GitHub', phase: 'active', toolCount: 2, tools: [{ name: 'mcp__github__a', description: 'a' }], addressable: true, readOnlyReason: null, editable: true, config: { transport: 'stdio', command: '', args: [], env: { GITHUB_TOKEN: '••••••' }, cwd: '' } },
         { rowId: 'r2', serverName: 'outer', transport: 'streamable-http', target: 'https://x/mcp', enabled: true, declared: false, phase: 'active', toolCount: 0, tools: [], addressable: false, readOnlyReason: 'management-required', editable: false, config: {} },
       ],
       managerAvailable: true,
@@ -1013,6 +1013,49 @@ function makeLocale(active = 'en') {
   const body = JSON.parse(posted.init.body)
   check('editing writes an mcp.configure op', body.ops[0].kind, 'mcp.configure')
   check('the edit carries the typed command', body.ops[0].config.command, 'node2')
+}
+
+// ─ 19b. 行内编辑：HTTP 服务器按完整 config 预填，凭据模板不被掩掉 ──────────
+// 真实载荷里 config 是**完整**的传输配置（秘密在 env/headers 下一层）。如果这里只
+// 回一个 env/headers 字典，编辑表单会退回 stdio、丢掉 URL —— 这一节把编辑表单钉在
+// 真实形状上，并确认 ${credential:NAME} 引用原样显示、原样保存。
+{
+	const httpServer = {
+		rowId: null,
+		serverName: 'magpie',
+		transport: 'streamable-http',
+		target: 'http://100.64.0.7:3425/mcp/magpie/hub',
+		enabled: true,
+		declared: true,
+		note: '凭据模板',
+		phase: 'active',
+		toolCount: 0,
+		tools: [],
+		addressable: true,
+		readOnlyReason: null,
+		editable: true,
+		config: {
+			transport: 'streamable-http',
+			url: 'http://100.64.0.7:3425/mcp/magpie/hub',
+			headers: { Authorization: 'Bearer ' + '${credential:SUN_MAGPIE_API_KEY}' },
+		},
+	}
+	const page = await mountPage(makeState({ mcp: { servers: [httpServer], managerAvailable: true, mcpClientAvailable: true } }))
+	buttons(page.tree).find((n) => textOf(n) === 'Expand group').props.onClick()
+	await page.settle()
+	buttons(page.tree).find((n) => textOf(n) === 'Edit').props.onClick()
+	await page.settle()
+	const transport = selects(page.tree).find((n) => n.props.id === 'skill-mcp-panel-mcp-magpie-transport')
+	check('the edit form starts on the stored transport', transport?.props.value, 'streamable-http')
+	const url = inputs(page.tree).find((n) => n.props.id === 'skill-mcp-panel-mcp-magpie-url')
+	check('the edit form carries the stored url', url?.props.value, 'http://100.64.0.7:3425/mcp/magpie/hub')
+	const headers = textareas(page.tree).find((n) => n.props.id === 'skill-mcp-panel-mcp-magpie-headers')
+	check('the edit form keeps the credential template visible', headers?.props.value, 'Authorization: Bearer ${credential:SUN_MAGPIE_API_KEY}')
+	buttons(page.tree).find((n) => textOf(n) === 'Save').props.onClick()
+	await page.settle()
+	const body = JSON.parse(page.fetchImpl.calls.filter((c) => c.input === '/skill-mcp-panel/apply').pop().init.body)
+	check('saving the untouched form keeps the transport', body.ops[0].config.transport, 'streamable-http')
+	check('saving the untouched form keeps the template', body.ops[0].config.headers.Authorization, 'Bearer ${credential:SUN_MAGPIE_API_KEY}')
 }
 
 // ─ 20. MCP 可以删除，且外部层的服务器不可改 ──────────────────────────────

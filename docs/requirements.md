@@ -186,6 +186,18 @@ provider、rank、是否可被模型调用、是否可被用户调用。
   必须带上 MCP 客户端 `error.cause` 链里的真实原因，而不是只有
   「initial connection or tool synchronization failed」。
 
+- F6.11 **credential 模板**：导入/新增配置里出现在传输字符串中的
+  `${credential:NAME}` 模板（stdio 的 command / args / env 值 / cwd，HTTP 的
+  url / headers 值）必须**原样保存**，并自动开启客户端的 `expandTemplates`
+  （否则字面 token 会被当成请求头发出去）。保存前：
+  (a) 校验语法 —— 任何 `${…}` 出现都必须是合法模板，否则 `refused` 并点名；
+  (b) 按宿主的 `credentials` 服务逐个解析引用，未配置的引用 `refused` 并点名，
+  **不写盘**；宿主没有 credentials provider 时同样拒绝并说明原因。
+  (c) 模板是**引用不是秘密**：状态接口不得把它掩码掉（否则用户看不到自己引用了哪个
+  凭据）；真实秘密仍按 key 掩码。
+  (d) `enabled: false` 的条目豁免解析（现在不连接，凭据可以以后配置），
+  与命令预检的豁免一致。
+
 > F6.3 的判定方式由开发在实现时**实测确定**并写入文档：
 > 先试动态挂载（loader 解析模块 + `ctx.plugin()` 挂载），成功则 `applied`；
 > 否则退回「写 patch + 提示重启」并报 `restart-required`。

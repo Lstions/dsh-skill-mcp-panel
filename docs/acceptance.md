@@ -634,42 +634,62 @@ mcp-live
 |---|---|---|
 | 主按钮白底白字 | `--dsw-alias-brand-primary` 在暗色主题是**近白**（`neutral-bluish-50`），而页面把文字写死成 `#fff` | 文字改用主题的 on-brand 令牌 `--dsw-alias-label-primary-foreground`（暗色近黑、亮色近白） |
 | 命名与备注要多点一层 | 导入被拆成「粘贴 → 预览 → 逐台确认」两步 | 合并为**一个表单**：文档 + 名称（必填）+ 备注（可选），一次提交；`mcp.import` 新增 `name`/`note` |
-| 创建后表单不还原 | 只有全部 `ok` 才收起，`restart-required` 不收起 | `applied` / `restart-required` / `unchanged` 都关闭并清空；全部被拒时保留输入 |
-| 创建后无工具 | 宿主 PATH 里没有 `npx`；旧行为先写声明、连接失败后只剩一句包装错误 | 保存前按 PATH 解析 `command`，找不到就 `refused`（**不写盘**）；挂载失败时 detail 带上 `error.cause` 链 |
 
-### 10.2 真实 MCP 活体验证（不是夹具）
+## §11 v1.8.0 交付记录（2026-11-13，Lead）
 
-环境：独立 `DSH_HOME`（模板 profile `smoke`，端口 3280，本地安装 v1.7.0），PATH 放入真实
-`npx`（npm 12.2.2 解包），代理 `192.168.20.6:10808`，npx 缓存落临时目录。
+### 11.1 需求
 
-1. 真实浏览器（headless Chromium 149 + CDP）打开 **Plugins → Skills & MCP**。
-2. 点 **Import JSON**，在同一个表单里粘贴用户给的 bing-search 文档、名称
-   `bing-search`、备注「必应中文搜索（npx -y bing-cn-mcp）」，点 **Import**。
-3. 结果：`Applied — bing-search — "bing-search" was added and is connected; 2 tool(s)
-   are registered.`；`GET /skill-mcp-panel/state` 里是
-   `mcp__bing-search__bing_search` 与 `mcp__bing-search__crawl_webpage`，
-   列表显示 `2 tools / Phase: active`，命令与备注都在。
-4. 反向用例：粘贴 `{"command":"npxx-not-installed"}` 导入 → 页面显示
-   `Refused — ghost — "ghost" was not added: command "npxx-not-installed" was not found
-   on PATH.`；表单保持打开，`state` 里没有 ghost（未写盘）。
-5. 证据：`live-server.png`（暗色下的列表：2 tools / Phase: active）与
-   `refusal.png`（一个表单 + Refused 行）。
+MCP 配置要支持宿主凭据模板，例如：
 
-### 10.3 清理
+```json
+{ "mcpServers": { "magpie": {
+  "url": "http://100.64.0.7:3425/mcp/magpie/hub",
+  "headers": { "Authorization": "Bearer ${credential:SUN_MAGPIE_API_KEY}" }
+} } }
+```
 
-临时 `DSH_HOME`、npm 缓存、Chrome profile、pnpm store 全部删除；3280/9333 无监听，
-无残留进程；只保留两张证据截图。
+### 11.2 实现
 
-### 10.4 未覆盖（不得读作通过）
+- 传输字符串里的 `${credential:NAME}`（stdio：command/args/env 值/cwd；HTTP：
+  url/headers 值）**原样保存**，并自动开启客户端 `expandTemplates`；保存前校验语法，
+  再按宿主 `credentials` 服务逐个解析引用 —— 未配置或没有 provider 就 `refused`、
+  不写盘；禁用条目豁免。
+- 模板是**引用不是秘密**：状态接口不再把它掩码成点；真实秘密仍按 key 掩码。
+- 视觉复核暴露并修复一个既有 bug：`McpServerRow.config` 以前只回 `env`/`headers`
+  字典，行内编辑表单默认回 stdio、丢掉 URL。现在回完整（掩码后）配置；URL 在状态里
+  脱敏，原样保存会还原真实值。
+- 修复启动竞态：宿主启动时 credentials 服务可能尚未就绪，带模板的服务器在 restore
+  时被跳过；`mount` 现在最多等 5 秒，服务出现后照常挂载。
 
-- **playwright 示例**（`npx @playwright/mcp@latest --headless`）未跑：需要为 MCP 包下载
-  Playwright 自己的浏览器（~150MB），本机只有 chromium 缓存，headless 下启动未验证。
-  它的命令存在性预检与失败原因链由 bing-search 成功用例 + 崩溃子进程用例覆盖。
-- 两套主题都人工看过：暗色（按钮近白底近黑字）与亮色（近黑底白字）都可读；只保留
-  暗色截图作为证据。
-- 同一份文档多台服务器在**界面**上被拒绝（逐台导入）——这是 F6.9(a) 的刻意选择；
-  API 的 `entries` 批量形式仍由单测覆盖。
+### 11.3 真实活体验证（真实 magpie 服务器 + 真实凭据）
+
+环境：独立 `DSH_HOME`（模板 profile，端口 3290），把真实的
+`~/.dsh/.credentials.yaml`（含 `SUN_MAGPIE_API_KEY`）复制进去，真实浏览器
+（headless Chromium + CDP）操作真实 UI。
+
+1. 导入用户给的原始配置 → `Applied — "magpie" was added and is connected; 66 tool(s)
+   are registered.`；state 里是 `mcp__magpie__amap-maps-streamableHTTP__*` 等 66 个
+   工具，phase active，且 `config.headers.Authorization` 仍是模板。
+2. 未配置引用（`${credential:NO_SUCH_KEY}`）→ `Refused — credential "NO_SUCH_KEY"
+   is not configured — store it in the harness credentials and retry.`；表单保留，
+   state 里没有该服务器。
+3. 行内编辑：transport=`streamable-http`、URL 正确、headers 显示
+   `Authorization: Bearer ${credential:SUN_MAGPIE_API_KEY}`（引用可见，不掩码）。
+4. **重启宿主**：服务器自动挂载（phase active、66 tools），不需要手动 toggle。
+
+证据：`cred-02-live.png`（66 tools）、`cred-03-refusal.png`（未配置引用被拒）、
+`cred-05-edit-fixed.png`（编辑表单预填）、`cred-06-live-expanded.png`（展开的 66 个工具）。
+
+### 11.4 清理
+
+临时 `DSH_HOME`、凭据副本、Chrome profile、pnpm store 全删；3290/9334 无监听、无残留。
+
+### 11.5 未覆盖
+
+- 凭据**轮换**（写 `.credentials.yaml` 触发 MCP 客户端重连）未单独跑：客户端自身的
+  `credentials/reference-updated` 监听是宿主行为，本插件只负责保存模板。
+- 只有真实 HTTP 服务器（magpie）走通；stdio 模板（command/env 里的引用）由单测覆盖，
+  未再起一个真实 stdio 进程。
 
 ---
-
 

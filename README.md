@@ -302,6 +302,19 @@ sections:
   tools, no idea why" and a fixable error. A disabled declaration is exempt: it
   is not spawned now, so it may name a command installed later.
 
+  **Credential templates.** A transport string may reference a host credential
+  with ${credential:NAME} (stdio: command/args/env values/cwd; HTTP: url/headers
+  values). The panel keeps the reference **verbatim** and turns the client's template
+  expansion on by itself — asking for a second flag would be a trap, because the
+  literal token would be sent to the server as the header value. Before anything is
+  written, every reference is resolved against the host's credentials service, so
+  an unconfigured ${credential:...} is refused with the name
+  ("credential "X" is not configured") instead of leaving a server that can never
+  connect; a host without a credentials provider is refused the same way. The
+  reference is a pointer, not a secret, so it stays visible in the list; resolved
+  values never enter the declaration or the state endpoint, and the client redacts
+  them from diagnostics. A disabled declaration is exempt (it is not connected now).
+
   When a server does start but fails to connect, the result is
   `restart-required` and the detail carries the client's own `cause` chain
   (spawn failure, handshake error, closed connection), not just the wrapper
@@ -687,7 +700,7 @@ Node.js ≥ 20.13 for `fs.watch(..., { recursive: true })`, plus
 Releases are semver and every released version has a `vX.Y.Z` git tag pointing at
 the exact commit; [CHANGELOG.md](CHANGELOG.md) records what changed.
 
-**Referenceable versions start at `1.4.0`; the current version is `1.7.0`.**
+**Referenceable versions start at `1.4.0`; the current version is `1.8.0`.**
 Before `1.4.0`, this repository published some version numbers twice with
 different content:
 

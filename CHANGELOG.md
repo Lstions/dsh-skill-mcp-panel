@@ -11,6 +11,7 @@
 
 | 版本 | 日期 | 提交 | 内容 |
 |---|---|---|---|
+| 1.8.0 | 2026-11-13 | 见下 | 支持 `${credential:NAME}` 凭据模板：原样保存、自动展开、保存前解析并拒绝未配置的引用；模板不掩码 |
 | 1.7.0 | 2026-11-13 | 见下 | 导入合并为一个表单（名称必填 + 备注可选）；保存前校验命令；挂载失败带真因；修主按钮对比度 |
 | 1.6.0 | 2026-11-13 | 见下 | 导入改为两步：先预览，逐台**确认名称（必填）与备注（可选）**，再写入 |
 | 1.5.0 | 2026-11-13 | 见下 | 新增 JSON 导入：粘贴 `mcpServers` 文档即可批量添加 MCP 服务器 |
@@ -44,6 +45,55 @@
 版本号补 tag，只会把歧义固化成「官方发布」。历史保留原样，在此如实记录。
 
 `test/version-check.mjs` 会阻止这件事再次发生：同一个版本号在下方出现两次即测试失败。
+
+## [1.8.0] - 2026-11-13
+
+### 新增：`${credential:NAME}` 凭据模板（F6.11）
+
+MCP 的传输字符串（stdio 的 `command` / `args` / `env` 值 / `cwd`，HTTP 的
+`url` / `headers` 值）现在支持宿主的凭据模板：
+
+@@@json
+{
+  "mcpServers": {
+    "magpie": {
+      "url": "http://100.64.0.7:3425/mcp/magpie/hub",
+      "headers": { "Authorization": "Bearer ${credential:SUN_MAGPIE_API_KEY}" }
+    }
+  }
+}
+@@@
+
+- 模板**原样保存**，并自动打开客户端的 `expandTemplates` —— 不要求用户再写第二个
+  开关（否则字面 token 会被当成请求头发出去）。
+- 保存前按宿主的 `credentials` 服务逐个解析引用：未配置的引用 `refused` 并点名
+  （`credential "X" is not configured — store it in the harness credentials and retry`），
+  **不写盘**；宿主没有 credentials provider 时同样拒绝并说明。禁用条目豁免。
+- 语法在保存前校验：任何 `${…}` 出现都必须是合法模板，否则拒绝并指出是哪个值。
+- 模板是**引用不是秘密**：列表里直接显示 `Bearer ${credential:...}`，不再显示成
+  掩码点；真实秘密仍按 key 掩码。解析后的值不会进入声明或状态接口。
+- 挂载失败时 detail 带上客户端 `cause` 链。
+
+- 修复一个被视觉复核暴露的既有 bug：`McpServerRow.config` 以前只回 `env`/`headers`
+  字典，行内编辑表单因此默认回 stdio、丢掉 URL。现在回**完整**的（掩码后）传输配置；
+  URL 在状态里脱敏（userinfo 与秘密查询参数），把脱敏后的 URL 原样保存会还原真实值。
+- 修复启动顺序竞态：宿主启动时 `credentials` 服务可能还没就绪，带模板的服务器在
+  `restoreDeclared` 阶段会被跳过、重启后一直离线。`mount` 现在最多等 5 秒等服务出现。
+
+### 测试
+
+- `test/mcp-inventory.mjs`：模板自动开启 expansion、原样保存、掩码豁免、非法语法
+  拒绝、已解析凭据 applied、未配置凭据 refused 不写盘、无 provider 拒绝、禁用豁免、
+  导入路径同样预检、启动时 credentials 服务延迟出现仍能挂载。
+- `test/ui-page.mjs`：19b 用真实载荷形状（完整 config）驱动编辑表单，确认
+  transport / url / headers 预填且模板原样保存。
+
+### 测试
+- 真实活体：临时 DSH 实例 + 真实 `.credentials.yaml` 里的 `SUN_MAGPIE_API_KEY`，
+  导入用户给的 magpie 配置 → applied、工具注册；未配置引用被拒（
+  `docs/acceptance.md` §11）。
+
+---
 
 ## [1.7.0] - 2026-11-13
 

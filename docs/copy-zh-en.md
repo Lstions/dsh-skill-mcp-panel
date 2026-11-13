@@ -148,7 +148,7 @@
 | `mcp.import.title` | MCP JSON | MCP JSON |
 | `mcp.import.submit` | 导入 | Import |
 | `mcp.import.unnamed` | 文档 | document |
-| `mcp.import.hint` | 粘贴一台服务器的 mcpServers（或 servers）文档，然后给它起名。名称必填（它会成为 mcp__<name>__ 工具前缀）；备注可选，显示在列表里，用来区分相似的服务器。支持 stdio 与 streamable-http，不支持 sse。 | Paste ONE server's mcpServers (or servers) document, then name it. The name is required — it becomes the mcp__<name>__ tool prefix — and the note is shown in the list so similar servers stay distinguishable. stdio and streamable-http are supported; sse is not. |
+| `mcp.import.hint` | 粘贴一台服务器的 mcpServers（或 servers）文档，然后给它起名。名称必填（它会成为 mcp__<name>__ 工具前缀）；备注可选，显示在列表里，用来区分相似的服务器。支持 stdio 与 streamable-http，不支持 sse。值里可以用 ${credential:NAME} 引用凭据，保存前会校验该凭据已配置。 | Paste ONE server's mcpServers (or servers) document, then name it. The name is required — it becomes the mcp__<name>__ tool prefix — and the note is shown in the list so similar servers stay distinguishable. stdio and streamable-http are supported; sse is not. Values may reference credentials as ${credential:NAME}; each reference is checked against the credential store before saving. |
 | `mcp.import.placeholder` | 见实现（一段 mcpServers 示例，两语相同） | see implementation (an mcpServers example, identical in both) |
 | `mcp.import.nameRequired` | 名称不能为空 | Name is required |
 | `mcp.field.note` | 备注（可选） | Note (optional) |

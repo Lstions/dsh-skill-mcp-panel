@@ -19,10 +19,14 @@ import {
 	parseMcpServers,
 	resolveCommand,
 	describeFailure,
+	configTemplateStrings,
 	NOTE_MAX_LENGTH,
 	SERVER_NAME_PATTERN
 } from '../lib/mcp.js'
-import { OP, STATUS, SECRET_MASK } from '../lib/contract.js'
+import { maskDict, OP, STATUS, SECRET_MASK } from '../lib/contract.js'
+
+/** The host's credential-template syntax, assembled without writing the token inline. */
+const credentialTemplate = (name) => '$' + '{credential:' + name + '}'
 
 let failures = 0
 function check(label, actual, expected) {
@@ -99,17 +103,26 @@ function makeManager({
 	writeThrows = false,
 	onMount,
 	resolveCommand = () => ({ path: '/fixture/bin/command', error: null }),
+	credentials,
+	// Simulates the boot-time ordering: the credentials service is not visible
+	// for the first N lookups, so a restore that does not wait misses it.
+	credentialsAfter = 0,
 	ctxExtra = {},
 	module
 } = {}) {
 	const state = { declared: declared.map((item) => structuredClone(item)) }
 	let lastWrite
+	let credentialLookups = 0
 	const ctx = {
 		logger: { info() {}, warn() {}, error() {} },
 		get(name) {
 			if (name === 'tools') return tools
 			if (name === 'loader') return loader
 			if (name === 'pluginManager') return pluginManager
+			if (name === 'credentials') {
+				credentialLookups += 1
+				return credentialLookups > credentialsAfter ? credentials : undefined
+			}
 			return undefined
 		},
 		plugin(plugin, pluginConfig) {
@@ -311,9 +324,13 @@ section('secret masking: output never carries a real secret')
 	const row = inventory.servers[0]
 	const serialized = JSON.stringify(inventory)
 	check('the real token never appears in the payload', serialized.includes('ghp_realtoken'), false)
-	check('the token key is still listed', Object.keys(row.config).sort(), ['GITHUB_TOKEN', 'PLAIN'])
-	check('the token value is masked', row.config.GITHUB_TOKEN, SECRET_MASK)
-	check('a non-secret value passes through', row.config.PLAIN, 'visible')
+	// The row's config is the FULL transport config (the edit form reads
+	// transport/command from it); secrets live one level down in env/headers.
+	check('the token key is still listed', Object.keys(row.config.env).sort(), ['GITHUB_TOKEN', 'PLAIN'])
+	check('the token value is masked', row.config.env.GITHUB_TOKEN, SECRET_MASK)
+	check('a non-secret value passes through', row.config.env.PLAIN, 'visible')
+	check('the edit form can read the transport', row.config.transport, 'stdio')
+	check('the edit form can read the command', row.config.command, 'node')
 }
 
 {
@@ -334,9 +351,15 @@ section('secret masking: output never carries a real secret')
 	const row = inventory.servers[0]
 	const serialized = JSON.stringify(inventory)
 	check('the bearer token never appears', serialized.includes('abc123realtoken'), false)
-	check('the header key is still listed', Object.keys(row.config).sort(), ['Authorization', 'X-Trace'])
-	check('the header value is masked', row.config.Authorization, SECRET_MASK)
-	check('a non-secret header passes through', row.config['X-Trace'], 'plain-value')
+	check('the header key is still listed', Object.keys(row.config.headers).sort(), ['Authorization', 'X-Trace'])
+	check('the header value is masked', row.config.headers.Authorization, SECRET_MASK)
+	check('a non-secret header passes through', row.config.headers['X-Trace'], 'plain-value')
+	const rawUrl = 'https://user:sup3rs3cret@mcp.example.test/mcp?apiKey=querysecret&page=2'
+	check('the edit form sees the redacted url', row.config.url, redactUrl(rawUrl))
+	check('the raw url never reaches the browser', serialized.includes('sup3rs3cret'), false)
+	// Echoing the redacted URL back unchanged must keep the stored credentials.
+	const restored = normalizeConfig({ transport: 'streamable-http', url: redactUrl(rawUrl) }, { url: rawUrl })
+	check('saving the redacted url unchanged restores the stored one', restored.config.url, rawUrl)
 	check('url userinfo is redacted in target', serialized.includes('sup3rs3cret'), false)
 	check('url secret query parameter is redacted', serialized.includes('querysecret'), false)
 	check('a non-secret query parameter survives', row.target.includes('page=2'), true)
@@ -1001,6 +1024,178 @@ section('command pre-flight: a command that cannot be spawned is refused')
 	})
 	check('a disabled server may name a not-yet-installed command', results.status, STATUS.APPLIED)
 	check('it is stored disabled', state.declared[0].enabled, false)
+}
+
+// ---------------------------------------------------------------------------
+section('credential templates: references stay visible and are resolved before saving')
+
+{
+	const reference = 'Bearer ' + credentialTemplate('SUN_MAGPIE_API_KEY')
+	const { config, error } = normalizeConfig({
+		transport: 'streamable-http',
+		url: 'http://100.64.0.7:3425/mcp/magpie/hub',
+		headers: { Authorization: reference }
+	})
+	check('a template normalises', error, null)
+	check('a template turns expansion on by itself', config.expandTemplates, true)
+	check('the template is stored verbatim', config.headers.Authorization, reference)
+	check('a template is not masked away', maskDict(config.headers).Authorization, reference)
+	check('a literal secret is still masked', maskDict({ Authorization: 'Bearer sk-real' }).Authorization, SECRET_MASK)
+
+	const explicit = normalizeConfig({ transport: 'stdio', command: 'node', env: { PLAIN: 'x' }, expandTemplates: true })
+	check('an explicit expandTemplates is kept', explicit.config.expandTemplates, true)
+	check(
+		'no tokens, no invented references',
+		configTemplateStrings(explicit.config).filter((entry) => entry.value.includes('credential:')).length,
+		0
+	)
+
+	const broken = normalizeConfig({
+		transport: 'streamable-http',
+		url: 'http://127.0.0.1:1/mcp',
+		headers: { Authorization: 'Bearer ' + credentialTemplate('A') + ' ' + '$' + '{NOT_A_TEMPLATE}' }
+	})
+	check('a malformed brace occurrence is refused', broken.config, null)
+	check('the refusal names the occurrence', broken.error.includes('not a credential template'), true)
+}
+
+{
+	// A registered reference reaches the declaration; the resolved value never
+	// does — the declaration keeps the template, the client expands at mount.
+	const reference = credentialTemplate('SUN_MAGPIE_API_KEY')
+	const { manager, state } = makeManager({
+		tools: makeTools([]),
+		loader: makeLoader([]),
+		credentials: {
+			resolve: async (ref) => (ref === 'SUN_MAGPIE_API_KEY' ? { value: 'sk-real-value', source: 'file' } : undefined)
+		},
+		onMount: mountPublishesOneTool
+	})
+	const outcome = await manager.apply({
+		kind: OP.MCP_ADD,
+		serverName: 'magpie',
+		config: {
+			transport: 'streamable-http',
+			url: 'http://100.64.0.7:3425/mcp/magpie/hub',
+			headers: { Authorization: 'Bearer ' + reference }
+		}
+	})
+	check('a resolvable credential is applied', outcome.status, STATUS.APPLIED)
+	check('the stored config keeps the reference', state.declared[0].config.headers.Authorization, 'Bearer ' + reference)
+	check('the stored config enables expansion', state.declared[0].config.expandTemplates, true)
+	check('the real secret never enters the declaration', JSON.stringify(state.declared[0]).includes('sk-real-value'), false)
+}
+
+{
+	const { manager, getLastWrite } = makeManager({
+		tools: makeTools([]),
+		loader: makeLoader([]),
+		credentials: { resolve: async () => undefined }
+	})
+	const outcome = await manager.apply({
+		kind: OP.MCP_ADD,
+		serverName: 'magpie',
+		config: {
+			transport: 'streamable-http',
+			url: 'http://100.64.0.7:3425/mcp/magpie/hub',
+			headers: { Authorization: 'Bearer ' + credentialTemplate('NOPE') }
+		}
+	})
+	check('an unconfigured credential is refused', outcome.status, STATUS.REFUSED)
+	check('the refusal names the credential', outcome.detail.includes('"NOPE"'), true)
+	check('the refusal says it is not configured', outcome.detail.includes('is not configured'), true)
+	check('nothing is written for an unconfigured credential', getLastWrite(), undefined)
+}
+
+{
+	const { manager, getLastWrite } = makeManager({ tools: makeTools([]), loader: makeLoader([]) })
+	const outcome = await manager.apply({
+		kind: OP.MCP_ADD,
+		serverName: 'magpie',
+		config: {
+			transport: 'streamable-http',
+			url: 'http://127.0.0.1:1/mcp',
+			headers: { Authorization: 'Bearer ' + credentialTemplate('X') }
+		}
+	})
+	check('a host without a credentials provider refuses', outcome.status, STATUS.REFUSED)
+	check('the refusal names the missing provider', outcome.detail.includes('no credentials provider'), true)
+	check('nothing is written without a provider', getLastWrite(), undefined)
+}
+
+{
+	// Disabled declarations are not connected now, so they may reference a
+	// credential that is stored later — same exemption as a missing command.
+	const { manager, state } = makeManager({
+		tools: makeTools([]),
+		loader: makeLoader([]),
+		credentials: { resolve: async () => undefined }
+	})
+	const outcome = await manager.apply({
+		kind: OP.MCP_ADD,
+		serverName: 'later',
+		config: {
+			transport: 'streamable-http',
+			url: 'http://127.0.0.1:1/mcp',
+			headers: { Authorization: 'Bearer ' + credentialTemplate('LATER') }
+		},
+		enabled: false
+	})
+	check('a disabled server may reference an unset credential', outcome.status, STATUS.APPLIED)
+	check('it is stored disabled', state.declared[0].enabled, false)
+}
+
+{
+	// The import path shares the same pre-flight, per entry.
+	const { manager, getLastWrite } = makeManager({
+		tools: makeTools([]),
+		loader: makeLoader([]),
+		credentials: { resolve: async () => undefined }
+	})
+	const results = await manager.apply({
+		kind: OP.MCP_IMPORT,
+		json: {
+			mcpServers: {
+				magpie: {
+					url: 'http://127.0.0.1:1/mcp',
+					headers: { Authorization: 'Bearer ' + credentialTemplate('MISSING') }
+				}
+			}
+		},
+		name: 'magpie'
+	})
+	check('import refuses an unconfigured credential', results[0].status, STATUS.REFUSED)
+	check('the import refusal names it', results[0].detail.includes('"MISSING"'), true)
+	check('nothing is written by the refused import', getLastWrite(), undefined)
+}
+
+// ---------------------------------------------------------------------------
+section('boot restore waits for the credentials service (ordering, not failure)')
+
+{
+	const reference = credentialTemplate('SUN_MAGPIE_API_KEY')
+	const declaration = {
+		serverName: 'magpie',
+		enabled: true,
+		config: {
+			transport: 'streamable-http',
+			url: 'http://100.64.0.7:3425/mcp/magpie/hub',
+			headers: { Authorization: 'Bearer ' + reference }
+		}
+	}
+	const { manager } = makeManager({
+		tools: makeTools([]),
+		loader: makeLoader([]),
+		declared: [declaration],
+		credentials: { resolve: async () => ({ value: 'sk-real-value', source: 'file' }) },
+		// The provider becomes visible after two lookups, exactly like a service
+		// whose init is still loading the file when the panel restores.
+		credentialsAfter: 2,
+		onMount: mountPublishesOneTool
+	})
+	const outcomes = await manager.restoreDeclared()
+	check('restore mounts once the credentials service appears', outcomes[0].mounted, true)
+	check('restore reports no error for a delayed service', outcomes[0].error, null)
 }
 
 // ---------------------------------------------------------------------------
