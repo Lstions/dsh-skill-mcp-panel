@@ -2,7 +2,7 @@
 
 > 供 `lib/client.js` 直接落地为 `ctx.locale.register("skill-mcp-panel", { zh, en })`。
 >
-> **两个字典的键集合完全一致**：各 **136** 个键（本文件末尾有计数校验证）。
+> **两个字典的键集合完全一致**：各 **130** 个键（本文件末尾有计数校验证）。
 > 键名用点分层级；`{name}` / `{provider}` / `{count}` / `{reason}` 是插值占位，
 > 由 `t(key, params)` 替换 —— 不要把它们写死进译文。
 
@@ -148,15 +148,9 @@
 | `mcp.import.title` | MCP JSON | MCP JSON |
 | `mcp.import.submit` | 导入 | Import |
 | `mcp.import.unnamed` | 文档 | document |
-| `mcp.import.hint` | 粘贴 mcpServers（或 servers）文档。支持 stdio 与 streamable-http，不支持 sse；本插件已声明过的同名服务器不会被覆盖。 | Paste an mcpServers (or servers) document. stdio and streamable-http are supported; sse is not. A name this plugin already declares is left untouched. |
+| `mcp.import.hint` | 粘贴一台服务器的 mcpServers（或 servers）文档，然后给它起名。名称必填（它会成为 mcp__<name>__ 工具前缀）；备注可选，显示在列表里，用来区分相似的服务器。支持 stdio 与 streamable-http，不支持 sse。 | Paste ONE server's mcpServers (or servers) document, then name it. The name is required — it becomes the mcp__<name>__ tool prefix — and the note is shown in the list so similar servers stay distinguishable. stdio and streamable-http are supported; sse is not. |
 | `mcp.import.placeholder` | 见实现（一段 mcpServers 示例，两语相同） | see implementation (an mcpServers example, identical in both) |
-| `mcp.import.review` | 解析预览 | Review |
-| `mcp.import.back` | 返回 | Back |
-| `mcp.import.reviewTitle` | 确认名称与备注 | Confirm names and notes |
-| `mcp.import.reviewHint` | 名称必填；备注可选，会显示在列表里 —— 多个相似的服务器就是靠它区分的。 | A name is required; a note is optional and is shown in the list, which is how two similar servers stay distinguishable. |
 | `mcp.import.nameRequired` | 名称不能为空 | Name is required |
-| `mcp.import.invalidEntry` | 该条无法按原样导入，请返回修改 JSON。 | This entry cannot be imported as written — go back and fix the JSON. |
-| `mcp.import.unreadable` | 无法解析这段 JSON：{reason} | The JSON could not be read: {reason} |
 | `mcp.field.note` | 备注（可选） | Note (optional) |
 
 ## 配置分区
@@ -180,7 +174,7 @@
 
 ## 计数校验
 
-页面字典（`UI_ZH` / `UI_EN`）必须各含以下 **136** 个键，且集合完全相等：
+页面字典（`UI_ZH` / `UI_EN`）必须各含以下 **130** 个键，且集合完全相等：
 
 ```
 tab.label, page.title, page.subtitle, page.refresh, page.loading, page.section.skills,
@@ -207,14 +201,12 @@ mcp.readonly.managementRequired, mcp.readonly.unaddressable, mcp.external.immuta
 mcp.unavailable, mcp.managerUnavailable, mcp.nameInvalid, mcp.nameDuplicate,
 mcp.secretMasked, mcp.hint.stdio, mcp.hint.http, mcp.save, mcp.create, mcp.import.button,
 mcp.import.title, mcp.import.submit, mcp.import.unnamed, mcp.import.hint,
-mcp.import.placeholder, mcp.import.review, mcp.import.back, mcp.import.reviewTitle,
-mcp.import.reviewHint, mcp.import.nameRequired, mcp.import.invalidEntry,
-mcp.import.unreadable, mcp.field.note, config.roots, config.rootsHint,
-config.rootsMissing, config.maxDepth, config.rank, config.duplicatePolicy,
-config.includeHidden, config.includeFlatRootFiles, config.watch, config.watchDebounceMs,
-config.providerName, config.writeAccess, config.writeAccessHint, writeAccessSameOrigin,
-writeAccessLoopback, config.editHint, config.reset, config.policyHint,
-config.rootsHintPage, config.save, config.saved, config.dirty
+mcp.import.placeholder, mcp.import.nameRequired, mcp.field.note, config.roots,
+config.rootsHint, config.rootsMissing, config.maxDepth, config.rank,
+config.duplicatePolicy, config.includeHidden, config.includeFlatRootFiles, config.watch,
+config.watchDebounceMs, config.providerName, config.writeAccess, config.writeAccessHint,
+writeAccessSameOrigin, writeAccessLoopback, config.editHint, config.reset,
+config.policyHint, config.rootsHintPage, config.save, config.saved, config.dirty
 ```
 
 这张清单必须与实现里的 `UI_ZH` / `UI_EN` 键集合**完全相等**（比较时忽略顺序）。

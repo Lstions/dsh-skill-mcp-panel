@@ -907,51 +907,17 @@ function makeLocale(active = 'en') {
   check('the op carries the note', body.ops[0].note, '本地夹具')
 }
 
-// ─ 18b. MCP 可以粘贴 JSON 导入（两步：解析预览 → 确认名称/备注）────────────
+// ─ 18b. MCP 可以粘贴 JSON 导入（一个表单：文档 + 名称 + 备注）──────────────
 // 用户手上通常已经有一段现成的 mcpServers 配置（Claude / Cursor / VS Code）。
-// 这一节守住三件事：页面把原始文本原样发给主机（解析只在主机侧，页面不另做
-// 一套规则）；**名称是必填项**（原始格式里根本没有名字，而 `mcp__<name>__`
-// 命名空间就是它定的）；备注可选，导入后显示在列表里 —— 相似的服务器靠它区分。
+// 这一节守住：页面把原始文本原样发给主机；**名称必填**（它决定 mcp__<name>__
+// 命名空间），备注可选，两者与文档在同一个表单里 —— 没有多余的中间步骤；
+// 落盘后表单关掉并清空，被拒时保留输入，方便就地改。
 {
-  const previewResults = [
-    {
-      kind: 'mcp.preview',
-      ok: true,
-      status: 'unchanged',
-      detail: 'would import npx -y bing-cn-mcp',
-      target: 'bing-search',
-      preview: {
-        serverName: 'bing-search',
-        note: '',
-        config: { transport: 'stdio', command: 'npx', args: ['-y', 'bing-cn-mcp'], env: {}, cwd: '' },
-        enabled: true,
-        nameError: null,
-        configError: null,
-      },
-    },
-    {
-      kind: 'mcp.preview',
-      ok: true,
-      status: 'unchanged',
-      detail: 'would import npx @playwright/mcp@latest --headless',
-      target: 'playwright',
-      preview: {
-        serverName: 'playwright',
-        note: '',
-        config: { transport: 'stdio', command: 'npx', args: ['@playwright/mcp@latest', '--headless'], env: {}, cwd: '' },
-        enabled: true,
-        nameError: null,
-        configError: null,
-      },
-    },
-  ]
   const page = await mountPage(
     makeState({ mcp: { servers: [], managerAvailable: true, mcpClientAvailable: true } }),
     {
-      previewResults,
       importResults: [
-        { kind: 'mcp.import', ok: true, status: 'applied', detail: '"bing-search-cn" was added and is connected; 1 tool(s) are registered.', target: 'bing-search-cn' },
-        { kind: 'mcp.import', ok: false, status: 'refused', detail: '"playwright" was refused', target: 'playwright' },
+        { kind: 'mcp.import', ok: true, status: 'applied', detail: '"playwright" was added and is connected; 24 tool(s) are registered.', target: 'playwright' },
       ],
     },
   )
@@ -961,143 +927,48 @@ function makeLocale(active = 'en') {
   await page.settle()
 
   const textarea = textareas(page.tree).find((node) => node.props.id === 'skill-mcp-panel-mcp-import-json')
-  check('the import form reveals a JSON textarea', textarea !== undefined, true)
-  check('the placeholder shows the canonical mcpServers shape', String(textarea.props.placeholder).includes('mcpServers'), true)
-  check('Review is disabled while the textarea is empty', buttons(page.tree).find((node) => textOf(node) === 'Review')?.props.disabled, true)
+  check('the import form has a JSON textarea', textarea !== undefined, true)
+  check('the SAME form asks for the name', inputs(page.tree).some((node) => node.props.id === 'skill-mcp-panel-mcp-import-name'), true)
+  check('the SAME form offers the optional note', inputs(page.tree).some((node) => node.props.id === 'skill-mcp-panel-mcp-import-note'), true)
+  check('Import is disabled while the textarea is empty', buttons(page.tree).find((node) => textOf(node) === 'Import')?.props.disabled, true)
 
   const document = JSON.stringify({
-    mcpServers: {
-      'bing-search': { command: 'npx', args: ['-y', 'bing-cn-mcp'] },
-      playwright: { command: 'npx', args: ['@playwright/mcp@latest', '--headless'] },
-    },
+    mcpServers: { playwright: { command: 'npx', args: ['@playwright/mcp@latest', '--headless'] } },
   })
   textarea.props.onChange({ target: { value: document } })
   await page.settle()
-  const review = buttons(page.tree).find((node) => textOf(node) === 'Review')
-  check('Review becomes available once text is pasted', review?.props.disabled, false)
-  review.props.onClick()
+  check('a pasted document alone is not enough: the name is required', buttons(page.tree).find((node) => textOf(node) === 'Import')?.props.disabled, true)
+  check('the missing name is called out', allText(page.tree).includes('Name is required'), true)
+
+  inputs(page.tree).find((node) => node.props.id === 'skill-mcp-panel-mcp-import-name').props.onChange({ target: { value: 'playwright' } })
   await page.settle()
-
-  const previewCall = page.fetchImpl.calls.filter((call) => call.input === '/skill-mcp-panel/apply').pop()
-  const previewBody = JSON.parse(previewCall.init.body)
-  check('reviewing sends an mcp.preview op', previewBody.ops[0].kind, 'mcp.preview')
-  // 原样转发：页面不做 pre-parse，否则两边对同一段文本会给出不同的拒绝理由。
-  check('the pasted text is sent verbatim for review', previewBody.ops[0].json, document)
-
-  const nameInputs = inputs(page.tree).filter((node) => String(node.props.id).startsWith('skill-mcp-panel-mcp-import-name-'))
-  const noteInputs = inputs(page.tree).filter((node) => String(node.props.id).startsWith('skill-mcp-panel-mcp-import-note-'))
-  check('the review step offers one name field per server', nameInputs.length, 2)
-  check('the review step offers one note field per server', noteInputs.length, 2)
-  check('the document key is prefilled as the name', nameInputs[0].props.value, 'bing-search')
-
-  // 名称必填：清空任何一条，导入按钮必须禁用。
-  nameInputs[0].props.onChange({ target: { value: '' } })
-  await page.settle()
-  check('Import is disabled while a name is empty', buttons(page.tree).find((node) => textOf(node) === 'Import')?.props.disabled, true)
-  check('the empty name is called out', allText(page.tree).includes('Name is required'), true)
-
-  const renamed = inputs(page.tree).filter((node) => String(node.props.id).startsWith('skill-mcp-panel-mcp-import-name-'))
-  renamed[0].props.onChange({ target: { value: 'bing-search-cn' } })
-  await page.settle()
-  const noted = inputs(page.tree).filter((node) => String(node.props.id).startsWith('skill-mcp-panel-mcp-import-note-'))
-  noted[0].props.onChange({ target: { value: '国内必应' } })
+  inputs(page.tree).find((node) => node.props.id === 'skill-mcp-panel-mcp-import-note').props.onChange({ target: { value: '无头浏览器' } })
   await page.settle()
   const submit = buttons(page.tree).find((node) => textOf(node) === 'Import')
-  check('Import becomes available once every name is filled', submit?.props.disabled, false)
+  check('Import becomes available once the name is filled', submit?.props.disabled, false)
   submit.props.onClick()
   await page.settle()
 
   const posted = page.fetchImpl.calls.filter((call) => call.input === '/skill-mcp-panel/apply').pop()
   const body = JSON.parse(posted.init.body)
-  check('importing sends an mcp.import op', body.ops[0].kind, 'mcp.import')
-  check('the op carries the reviewed entries', body.ops[0].entries.length, 2)
-  check('the edited name is sent', body.ops[0].entries[0].serverName, 'bing-search-cn')
-  check('the note is sent', body.ops[0].entries[0].note, '国内必应')
-  check('the connection config is carried through', body.ops[0].entries[0].config.command, 'npx')
-  check('the untouched entry keeps its document name', body.ops[0].entries[1].serverName, 'playwright')
+  check('the write carries an mcp.import op', body.ops[0].kind, 'mcp.import')
+  // 原样转发：页面不做 pre-parse，否则两边对同一段文本会给出不同的拒绝理由。
+  check('the pasted text is sent verbatim', body.ops[0].json, document)
+  check('the name is sent with it', body.ops[0].name, 'playwright')
+  check('the note is sent with it', body.ops[0].note, '无头浏览器')
 
-  const text = allText(page.tree)
-  check('every imported server is reported', text.includes('bing-search-cn') && text.includes('playwright'), true)
-  check('an applied server reads as applied', text.includes('Applied'), true)
-  check('a refused server reads as refused', text.includes('Refused'), true)
-
-  // 有失败项时预览必须留着，用户要能就地改名再试。
-  check(
-    'a partially failed import keeps the review step open',
-    inputs(page.tree).some((node) => String(node.props.id).startsWith('skill-mcp-panel-mcp-import-name-')),
-    true,
-  )
+  check('the result is reported', allText(page.tree).includes('playwright'), true)
+  check('a persisted import closes the form', textareas(page.tree).some((node) => node.props.id === 'skill-mcp-panel-mcp-import-json'), false)
+  check('a persisted import clears the typed name', inputs(page.tree).some((node) => node.props.id === 'skill-mcp-panel-mcp-import-name'), false)
 }
 
-// 文档级失败（坏 JSON、空文档）不该进入 review：不该让用户去命名一条不存在的条目，
-// 也不该假装“解析成功、只是名字为空”。
+// 被拒时保留表单与输入，用户就地改。
 {
   const page = await mountPage(
     makeState({ mcp: { servers: [], managerAvailable: true, mcpClientAvailable: true } }),
     {
-      previewResults: [
-        {
-          kind: 'mcp.preview',
-          ok: true,
-          status: 'unchanged',
-          detail: 'the text is not valid JSON: Unexpected end of JSON input',
-          preview: {
-            serverName: null,
-            note: '',
-            config: null,
-            enabled: true,
-            nameError: null,
-            configError: 'the text is not valid JSON: Unexpected end of JSON input',
-          },
-        },
-      ],
-    },
-  )
-  buttons(page.tree).find((node) => textOf(node) === 'Import JSON').props.onClick()
-  await page.settle()
-  textareas(page.tree)
-    .find((node) => node.props.id === 'skill-mcp-panel-mcp-import-json')
-    .props.onChange({ target: { value: '{"mcpServers":' } })
-  await page.settle()
-  buttons(page.tree).find((node) => textOf(node) === 'Review').props.onClick()
-  await page.settle()
-  check('an unreadable document is explained on the paste step', allText(page.tree).includes('could not be read'), true)
-  check(
-    'an unreadable document keeps the textarea for editing',
-    textareas(page.tree).some((node) => node.props.id === 'skill-mcp-panel-mcp-import-json'),
-    true,
-  )
-  check(
-    'no phantom review row appears',
-    inputs(page.tree).some((node) => String(node.props.id).startsWith('skill-mcp-panel-mcp-import-name-')),
-    false,
-  )
-}
-
-// 全部成功时整个导入流程收起：不留下表单和预览行。
-{
-  const page = await mountPage(
-    makeState({ mcp: { servers: [], managerAvailable: true, mcpClientAvailable: true } }),
-    {
-      previewResults: [
-        {
-          kind: 'mcp.preview',
-          ok: true,
-          status: 'unchanged',
-          detail: 'would import node srv.mjs',
-          target: 'renamed',
-          preview: {
-            serverName: 'renamed',
-            note: '',
-            config: { transport: 'stdio', command: 'node', args: ['srv.mjs'], env: {}, cwd: '' },
-            enabled: true,
-            nameError: null,
-            configError: null,
-          },
-        },
-      ],
       importResults: [
-        { kind: 'mcp.import', ok: true, status: 'applied', detail: '"renamed" was added and is connected; 1 tool(s) are registered.', target: 'renamed' },
+        { kind: 'mcp.import', ok: false, status: 'refused', detail: '"playwright" was not added: command "npx" was not found on PATH.', target: 'playwright' },
       ],
     },
   )
@@ -1105,17 +976,20 @@ function makeLocale(active = 'en') {
   await page.settle()
   textareas(page.tree)
     .find((node) => node.props.id === 'skill-mcp-panel-mcp-import-json')
-    .props.onChange({ target: { value: '{"command":"node","args":["srv.mjs"]}' } })
+    .props.onChange({ target: { value: '{"mcpServers":{"playwright":{"command":"npx"}}}' } })
   await page.settle()
-  buttons(page.tree).find((node) => textOf(node) === 'Review').props.onClick()
+  inputs(page.tree).find((node) => node.props.id === 'skill-mcp-panel-mcp-import-name').props.onChange({ target: { value: 'playwright' } })
   await page.settle()
   buttons(page.tree).find((node) => textOf(node) === 'Import').props.onClick()
   await page.settle()
-  check('a fully successful import closes the flow', textareas(page.tree).some((node) => node.props.id === 'skill-mcp-panel-mcp-import-json'), false)
-  check('no review rows are left behind', inputs(page.tree).some((node) => String(node.props.id).startsWith('skill-mcp-panel-mcp-import-name-')), false)
-  check('the import result is still reported', allText(page.tree).includes('renamed'), true)
+  check('a refused import is reported verbatim', allText(page.tree).includes('was not found on PATH'), true)
+  check('a refused import keeps the form open', textareas(page.tree).some((node) => node.props.id === 'skill-mcp-panel-mcp-import-json'), true)
+  check(
+    'a refused import keeps the typed name',
+    inputs(page.tree).find((node) => node.props.id === 'skill-mcp-panel-mcp-import-name')?.props.value,
+    'playwright',
+  )
 }
-
 
 // ─ 19. MCP 可以修改：行内编辑发出 mcp.configure ──────────────────────────
 {

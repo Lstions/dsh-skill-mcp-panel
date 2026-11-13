@@ -11,6 +11,7 @@
 
 | 版本 | 日期 | 提交 | 内容 |
 |---|---|---|---|
+| 1.7.0 | 2026-11-13 | 见下 | 导入合并为一个表单（名称必填 + 备注可选）；保存前校验命令；挂载失败带真因；修主按钮对比度 |
 | 1.6.0 | 2026-11-13 | 见下 | 导入改为两步：先预览，逐台**确认名称（必填）与备注（可选）**，再写入 |
 | 1.5.0 | 2026-11-13 | 见下 | 新增 JSON 导入：粘贴 `mcpServers` 文档即可批量添加 MCP 服务器 |
 | 1.4.4 | 2026-11-08 | 见下 | 澄清 MCP 面板的作用范围：只覆盖 DSH 组合层，不读其它客户端配置 |
@@ -43,6 +44,79 @@
 版本号补 tag，只会把歧义固化成「官方发布」。历史保留原样，在此如实记录。
 
 `test/version-check.mjs` 会阻止这件事再次发生：同一个版本号在下方出现两次即测试失败。
+
+## [1.7.0] - 2026-11-13
+
+### 修复：主按钮在暗色主题下白底白字
+
+`--dsw-alias-brand-primary` 在暗色主题里是**近白色**（`neutral-bluish-50`），而
+`.skn_buttonPrimary` 把文字写死成 `#fff` —— 于是「解析预览 / 导入」变成了一个
+没有文字的白色方块（用户截图可见）。改用主题自己的 on-brand 令牌
+`--dsw-alias-label-primary-foreground`：暗色下近黑、亮色下近白，两种主题都可读。
+
+### 导入：一个表单、名称必填、备注可选（去掉中间步骤）
+
+上一版把导入拆成「贴文档 → 预览 → 逐台确认」两步，多了一次点击，而且预览里的
+名称输入框让人以为还要再确认一遍。现在只有一个表单：
+
+@@@
+MCP JSON        [textarea]
+名称（必填）      [input]
+备注（可选）      [input]
+                [导入] [取消]
+@@@
+
+- `mcp.import` 新增 `name` / `note` 字段：页面把文档原文、名称、备注一次发过去，
+  主机解析后把名称/备注应用到**那一台**服务器。
+- **一份文档只导入一台**（名称/备注只能描述一台）。多台文档会被 `refused` 并提示
+  「一次导入一台」；脚本仍可用 `entries` 形式批量导入。
+- 名称必填且校验字符集；备注可选、≤200 字符。名称决定 `mcp__<name>__` 工具前缀。
+- **落盘后表单关闭并清空**（`applied` / `restart-required` / `unchanged` 都算写入
+  成功）；全部被拒时保留输入，方便就地修改。之前"已保存，重启后生效"之后表单还挂着
+  上一轮内容，被误以为没创建。
+- 备注仍随声明持久化、显示在列表、可随时编辑。
+
+### 新增：保存前校验命令（F6.10）
+
+stdio 服务器的 `command` 现在在**写入之前**按宿主的 PATH 解析：
+
+- 裸命令（`npx`、`node`）→ 在 `process.env.PATH` 的各目录里查找可执行文件；
+- 绝对/相对路径 → 检查存在且可执行；
+- 找不到 → `refused` 并说明（`command "npx" was not found on PATH`），**不写盘**。
+- `enabled: false` 的条目豁免（现在不 spawn，命令可以以后装）。
+
+这正是用户遇到的「创建后无工具」的根因：宿主 PATH 里没有 `npx`，旧行为先写声明、
+连接失败后只留下一行「已保存，重启后生效」，永远不会有工具。
+
+### 修复：挂载失败的说明带上了真正的原因
+
+MCP 客户端只抛出包装句「initial connection or tool synchronization failed」，真正原因
+在 `error.cause` 里（spawn ENOENT、握手失败、连接被关闭）。现在 `describeFailure()`
+遍历 cause 链并把每层消息拼进结果 detail：
+
+@@@
+"dies" was declared but cannot be mounted live (mcp-client(dies): initial connection
+or tool synchronization failed: Connection closed); it takes effect after a restart.
+@@@
+
+### 契约
+
+- `mcp.import`：新增可选 `name` / `note`（页面使用）；`json` / `servers` /
+  `entries` 形式保留。
+- `mcp.preview` 保留给脚本（页面不再调用）。
+- 新增导出 `resolveCommand()`、`describeFailure()`，供主机与测试共用。
+
+### 测试
+
+- `test/ui-page.mjs`：一个表单里贴文档 + 填名称 + 填备注 → 提交；名称为空时禁用
+  导入；提交后表单关闭并清空；被拒时保留输入；按钮样式走主题令牌（键表 130）。
+- `test/mcp-inventory.mjs`：名称/备注解析与落盘、多台文档拒绝、名称/备注校验、
+  命令预检（真解析器）、disabled 豁免、cause 链。
+- `test/mcp-live.mjs`：缺失命令 → refused 且不写盘；命令存在但进程即退 →
+  restart-required 且 detail 带 "Connection closed"。
+- `tests/verify/cases/f63.mjs`：区分「缺失命令不落盘」与「不可达端点保留重试」。
+
+---
 
 ## [1.6.0] - 2026-11-13
 

@@ -72,6 +72,11 @@ export async function run(report) {
       `detail=${JSON.stringify(deadStdio?.detail)}`,
     )
     report.assert(
+      'F6.3: the refusal names the missing command and says what is wrong',
+      /definitely-not-here/.test(deadStdio?.detail ?? '') && /does not exist/.test(deadStdio?.detail ?? ''),
+      `detail=${JSON.stringify(deadStdio?.detail)} — "not found"/"does not exist" is the actionable part`,
+    )
+    report.assert(
       'F6.3: a dead server contributes no tools',
       host.toolNames('mcp__dead-stdio__').length === 0,
       JSON.stringify(host.toolNames()),
@@ -109,12 +114,21 @@ export async function run(report) {
       `tools=${JSON.stringify(host.toolNames())} — "applied" with no tools is exactly the lie this case targets`,
     )
 
-    // ---- 4. a failed server stays persisted -------------------------------
+    // ---- 4. what a failure persists --------------------------------------
+    // A command that does not exist is a configuration error: it is refused and
+    // NOT saved (a saved row would sit in the panel with no tools and no clue).
+    // An unreachable endpoint is a different case — the config is valid and a
+    // restart may recover it — so it stays declared.
     report.observe('declarations', host.declarations.map((d) => d.serverName))
     report.assert(
-      'F6.3: the dead server is still declared, so the user can see and fix it',
-      host.declarations.some((d) => d.serverName === 'dead-stdio'),
-      `declared=${JSON.stringify(host.declarations.map((d) => d.serverName))} — dropping it silently would hide the failure`,
+      'F6.3: a missing command is refused before it is saved (no dead row)',
+      !host.declarations.some((d) => d.serverName === 'dead-stdio'),
+      `declared=${JSON.stringify(host.declarations.map((d) => d.serverName))} — persisting a command that cannot spawn is what produces "saved" with no tools`,
+    )
+    report.assert(
+      'F6.3: an unreachable endpoint stays declared, so a restart can retry it',
+      host.declarations.some((d) => d.serverName === 'dead-http'),
+      `declared=${JSON.stringify(host.declarations.map((d) => d.serverName))} — a valid config that failed once must not be dropped`,
     )
 
     // ---- 5. removal takes the tools away ----------------------------------

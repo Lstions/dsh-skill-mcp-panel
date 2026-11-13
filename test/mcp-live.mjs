@@ -259,13 +259,12 @@ check('an external server cannot be removed by this plugin', refusedRemove.statu
 check('the external server is still live', Boolean(ctx.get('tools').get('mcp__external__ping')), true)
 
 // ---------------------------------------------------------------------------
-section('live add of a DEAD server: never reported as applied')
+section('live add of a server with a missing command: refused before it is saved')
 
-// The MCP client's schema defaults failOnStartupError to false, under which a
-// command that does not exist still settles the fiber with zero tools. Awaiting
-// the fiber alone would therefore report `applied` for a server that never ran;
-// the manager overrides the flag so the failure is observable. This test is the
-// regression guard for that override.
+// This used to persist a declaration and report `restart-required`; the row then
+// sat in the panel with no tools and no explanation ("saved, takes effect after a
+// restart") forever. A command that cannot be spawned is a configuration error,
+// so it is refused up front and nothing is written.
 {
 	const before = declared.length
 	const outcome = await manager.apply({
@@ -273,19 +272,39 @@ section('live add of a DEAD server: never reported as applied')
 		serverName: 'dead',
 		config: { transport: 'stdio', command: '/nonexistent/definitely-not-a-binary-xyz', args: [], env: {}, cwd: '' }
 	})
-	check('a dead server is NOT reported as applied', outcome.status === STATUS.APPLIED, false)
-	check('a dead server reports restart-required', outcome.status, STATUS.RESTART_REQUIRED)
-	check('the failure reason is carried in the detail', outcome.detail.includes('initial connection'), true)
+	check('a missing command is NOT reported as applied', outcome.status === STATUS.APPLIED, false)
+	check('a missing command is refused outright', outcome.status, STATUS.REFUSED)
+	check('the refusal names the command', outcome.detail.includes('/nonexistent/definitely-not-a-binary-xyz'), true)
+	check('the refusal says it does not exist', outcome.detail.includes('does not exist'), true)
+	check('nothing is persisted for a missing command', declared.length, before)
+	check('the refused server contributed no tools', ctx.get('tools').schemas().some((s) => s.name.startsWith('mcp__dead__')), false)
+}
+
+section('live add of a server that starts and dies: restart-required, WITH the cause')
+
+// The command exists, so the pre-flight passes; the connection then fails. The
+// declaration is kept (a restart can retry), but the detail must carry the real
+// reason from the client's `cause` chain instead of only the wrapper sentence.
+{
+	const before = declared.length
+	const outcome = await manager.apply({
+		kind: OP.MCP_ADD,
+		serverName: 'dies',
+		config: { transport: 'stdio', command: process.execPath, args: ['-e', 'process.exit(1)'], env: {}, cwd: '' }
+	})
+	check('a crashing server is NOT reported as applied', outcome.status === STATUS.APPLIED, false)
+	check('a crashing server reports restart-required', outcome.status, STATUS.RESTART_REQUIRED)
+	check('the wrapper detail is carried', outcome.detail.includes('initial connection'), true)
+	check('the underlying cause is carried too', outcome.detail.split(': ').length > 2, true)
 	check('the declaration is still persisted for the next start', declared.length, before + 1)
-	check('the dead server contributed no tools', ctx.get('tools').schemas().some((s) => s.name.startsWith('mcp__dead__')), false)
 
 	// The persisted config keeps the user's chosen value; only the live instance
 	// forced the flag on.
-	const stored = declared.find((item) => item.serverName === 'dead')
+	const stored = declared.find((item) => item.serverName === 'dies')
 	check('the persisted config is not mutated by the live override', stored.config.failOnStartupError, undefined)
 
-	const cleanup = await manager.apply({ kind: OP.MCP_REMOVE, serverName: 'dead' })
-	check('the dead declaration can be removed', cleanup.status, STATUS.APPLIED)
+	const cleanup = await manager.apply({ kind: OP.MCP_REMOVE, serverName: 'dies' })
+	check('the failing declaration can be removed', cleanup.status, STATUS.APPLIED)
 }
 
 {
@@ -299,6 +318,7 @@ section('live add of a DEAD server: never reported as applied')
 	check('a dead http server reports restart-required', outcome.status, STATUS.RESTART_REQUIRED)
 	await manager.apply({ kind: OP.MCP_REMOVE, serverName: 'deadhttp' })
 }
+
 
 // ---------------------------------------------------------------------------
 section('live import: a pasted document mounts a real child process')

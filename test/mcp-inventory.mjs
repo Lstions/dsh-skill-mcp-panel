@@ -17,6 +17,8 @@ import {
 	describeTarget,
 	redactUrl,
 	parseMcpServers,
+	resolveCommand,
+	describeFailure,
 	NOTE_MAX_LENGTH,
 	SERVER_NAME_PATTERN
 } from '../lib/mcp.js'
@@ -80,8 +82,26 @@ function makeLoader(rows, options = {}) {
 	}
 }
 
-/** Build a manager over a fake context. Every dep is overridable per test. */
-function makeManager({ tools, loader, pluginManager, declared = [], config = {}, onWrite, writeThrows = false, onMount, ctxExtra = {}, module } = {}) {
+/**
+ * Build a manager over a fake context. Every dep is overridable per test.
+ *
+ * The command pre-flight is stubbed by default so a fixture can name any command
+ * (`npx`, `node`, a fixture path) regardless of what this host's PATH happens to
+ * carry; tests that exercise the REAL resolver pass it explicitly.
+ */
+function makeManager({
+	tools,
+	loader,
+	pluginManager,
+	declared = [],
+	config = {},
+	onWrite,
+	writeThrows = false,
+	onMount,
+	resolveCommand = () => ({ path: '/fixture/bin/command', error: null }),
+	ctxExtra = {},
+	module
+} = {}) {
 	const state = { declared: declared.map((item) => structuredClone(item)) }
 	let lastWrite
 	const ctx = {
@@ -121,7 +141,8 @@ function makeManager({ tools, loader, pluginManager, declared = [], config = {},
 			state.declared = structuredClone(next)
 			onWrite?.(next)
 		},
-		readConfig: () => config
+		readConfig: () => config,
+		resolveCommand
 	})
 	return { manager, state, getLastWrite: () => lastWrite, ctx, module }
 }
@@ -863,6 +884,124 @@ function mountPublishesOneTool(config, tools, registered) {
 }
 
 
+
+// ---------------------------------------------------------------------------
+section('import names the server in one step (name + optional note)')
+
+{
+	const tools = makeTools([])
+	const { manager, state } = makeManager({ tools, loader: makeLoader([]), onMount: mountPublishesOneTool })
+	const results = await manager.apply({
+		kind: OP.MCP_IMPORT,
+		json: { mcpServers: { playwright: { command: 'node', args: ['srv.mjs'] } } },
+		name: 'playwright-headless',
+		note: '  无头浏览器  '
+	})
+	check('one result for a one-server document', results.length, 1)
+	check('the explicit name replaces the document key', results[0].target, 'playwright-headless')
+	check('the import is applied', results[0].status, STATUS.APPLIED)
+	check('the server is stored under the typed name', state.declared.map((item) => item.serverName), ['playwright-headless'])
+	check('the note is stored trimmed', state.declared[0].note, '无头浏览器')
+	check('the documented command is kept', state.declared[0].config.command, 'node')
+	const inventory = await manager.describe()
+	check('the note is reported for the list', inventory.servers[0].note, '无头浏览器')
+}
+
+{
+	// A single name cannot describe several servers; refusing is better than
+	// importing the extras under document keys the user never saw.
+	const { manager, getLastWrite } = makeManager({ tools: makeTools([]), loader: makeLoader([]) })
+	const results = await manager.apply({
+		kind: OP.MCP_IMPORT,
+		json: { mcpServers: { one: { command: 'node' }, two: { command: 'node' } } },
+		name: 'only-one'
+	})
+	check('a name cannot import a multi-server document', results.length, 1)
+	check('the refusal explains one-at-a-time', results[0].status, STATUS.REFUSED)
+	check('the refusal says why', results[0].detail.includes('one at a time'), true)
+	check('nothing was written', getLastWrite(), undefined)
+}
+
+{
+	// The typed name is validated like any other serverName.
+	const { manager, getLastWrite } = makeManager({ tools: makeTools([]), loader: makeLoader([]) })
+	const results = await manager.apply({
+		kind: OP.MCP_IMPORT,
+		json: { mcpServers: { x: { command: 'node' } } },
+		name: 'bad.name'
+	})
+	check('an invalid typed name is refused', results[0].status, STATUS.REFUSED)
+	check('the refusal names the pattern', results[0].detail.includes('not a valid serverName'), true)
+	check('an invalid name wrote nothing', getLastWrite(), undefined)
+}
+
+{
+	// A too-long note is a refusal, not a silent truncation.
+	const { manager, getLastWrite } = makeManager({ tools: makeTools([]), loader: makeLoader([]) })
+	const results = await manager.apply({
+		kind: OP.MCP_IMPORT,
+		json: { mcpServers: { x: { command: 'node' } } },
+		name: 'x',
+		note: 'n'.repeat(NOTE_MAX_LENGTH + 1)
+	})
+	check('an over-long typed note is refused', results[0].status, STATUS.REFUSED)
+	check('the note limit is stated', results[0].detail.includes(String(NOTE_MAX_LENGTH)), true)
+	check('an over-long note wrote nothing', getLastWrite(), undefined)
+}
+
+// ---------------------------------------------------------------------------
+section('command pre-flight: a command that cannot be spawned is refused')
+
+{
+	const found = resolveCommand(process.execPath)
+	check('an absolute executable resolves', found.error, null)
+	check('a bare name on PATH resolves', resolveCommand('node').error, null)
+	const missingName = resolveCommand('dsbx-definitely-not-a-command')
+	check('a missing bare command is refused', missingName.error.includes('was not found on PATH'), true)
+	const missingPath = resolveCommand('/nonexistent/dsbx-cmd')
+	check('a missing absolute command is refused', missingPath.error.includes('does not exist'), true)
+	check('an empty command is refused', resolveCommand('').error, 'command is empty')
+	check('describeFailure walks the cause chain', describeFailure(new Error('outer', { cause: new Error('spawn ENOENT') })), 'outer: spawn ENOENT')
+}
+
+{
+	// Through the manager, with the REAL resolver: a missing command must not be
+	// persisted, because persisting it is exactly how a dead row appeared.
+	const { manager, getLastWrite } = makeManager({ tools: makeTools([]), loader: makeLoader([]), resolveCommand })
+	const refused = await manager.apply({
+		kind: OP.MCP_ADD,
+		serverName: 'ghost',
+		config: { transport: 'stdio', command: 'dsbx-definitely-not-a-command' }
+	})
+	check('add refuses a command that is not on PATH', refused.status, STATUS.REFUSED)
+	check('the refusal names the PATH problem', refused.detail.includes('was not found on PATH'), true)
+	check('a refused command writes nothing', getLastWrite(), undefined)
+}
+
+{
+	const { manager, getLastWrite } = makeManager({ tools: makeTools([]), loader: makeLoader([]), resolveCommand })
+	const results = await manager.apply({
+		kind: OP.MCP_IMPORT,
+		json: { mcpServers: { ghost: { command: '/nonexistent/dsbx-cmd' } } }
+	})
+	check('import refuses a command that does not exist', results[0].status, STATUS.REFUSED)
+	check('the import refusal carries the reason', results[0].detail.includes('does not exist'), true)
+	check('a refused import writes nothing', getLastWrite(), undefined)
+}
+
+{
+	// A DISABLED declaration is not spawned now, so it may name a command that is
+	// installed later; pre-flighting it would block a legitimate staging entry.
+	const { manager, state } = makeManager({ tools: makeTools([]), loader: makeLoader([]), resolveCommand })
+	const results = await manager.apply({
+		kind: OP.MCP_ADD,
+		serverName: 'later',
+		config: { transport: 'stdio', command: 'dsbx-definitely-not-a-command' },
+		enabled: false
+	})
+	check('a disabled server may name a not-yet-installed command', results.status, STATUS.APPLIED)
+	check('it is stored disabled', state.declared[0].enabled, false)
+}
 
 // ---------------------------------------------------------------------------
 section('pure helpers')

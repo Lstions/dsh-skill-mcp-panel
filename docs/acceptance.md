@@ -626,3 +626,50 @@ mcp-live
   4. 本机 `~/.hermes/skills` 已空，`f44` / `scale` / `perf` 三个 verify case 仍为
      BLOCKED —— 与本次改动无关，也不能读作通过。
 
+## §10 v1.7.0 交付记录（2026-11-13，Lead）
+
+### 10.1 用户报告的四个问题 → 修复
+
+| 报告 | 根因 | 修复 |
+|---|---|---|
+| 主按钮白底白字 | `--dsw-alias-brand-primary` 在暗色主题是**近白**（`neutral-bluish-50`），而页面把文字写死成 `#fff` | 文字改用主题的 on-brand 令牌 `--dsw-alias-label-primary-foreground`（暗色近黑、亮色近白） |
+| 命名与备注要多点一层 | 导入被拆成「粘贴 → 预览 → 逐台确认」两步 | 合并为**一个表单**：文档 + 名称（必填）+ 备注（可选），一次提交；`mcp.import` 新增 `name`/`note` |
+| 创建后表单不还原 | 只有全部 `ok` 才收起，`restart-required` 不收起 | `applied` / `restart-required` / `unchanged` 都关闭并清空；全部被拒时保留输入 |
+| 创建后无工具 | 宿主 PATH 里没有 `npx`；旧行为先写声明、连接失败后只剩一句包装错误 | 保存前按 PATH 解析 `command`，找不到就 `refused`（**不写盘**）；挂载失败时 detail 带上 `error.cause` 链 |
+
+### 10.2 真实 MCP 活体验证（不是夹具）
+
+环境：独立 `DSH_HOME`（模板 profile `smoke`，端口 3280，本地安装 v1.7.0），PATH 放入真实
+`npx`（npm 12.2.2 解包），代理 `192.168.20.6:10808`，npx 缓存落临时目录。
+
+1. 真实浏览器（headless Chromium 149 + CDP）打开 **Plugins → Skills & MCP**。
+2. 点 **Import JSON**，在同一个表单里粘贴用户给的 bing-search 文档、名称
+   `bing-search`、备注「必应中文搜索（npx -y bing-cn-mcp）」，点 **Import**。
+3. 结果：`Applied — bing-search — "bing-search" was added and is connected; 2 tool(s)
+   are registered.`；`GET /skill-mcp-panel/state` 里是
+   `mcp__bing-search__bing_search` 与 `mcp__bing-search__crawl_webpage`，
+   列表显示 `2 tools / Phase: active`，命令与备注都在。
+4. 反向用例：粘贴 `{"command":"npxx-not-installed"}` 导入 → 页面显示
+   `Refused — ghost — "ghost" was not added: command "npxx-not-installed" was not found
+   on PATH.`；表单保持打开，`state` 里没有 ghost（未写盘）。
+5. 证据：`live-server.png`（暗色下的列表：2 tools / Phase: active）与
+   `refusal.png`（一个表单 + Refused 行）。
+
+### 10.3 清理
+
+临时 `DSH_HOME`、npm 缓存、Chrome profile、pnpm store 全部删除；3280/9333 无监听，
+无残留进程；只保留两张证据截图。
+
+### 10.4 未覆盖（不得读作通过）
+
+- **playwright 示例**（`npx @playwright/mcp@latest --headless`）未跑：需要为 MCP 包下载
+  Playwright 自己的浏览器（~150MB），本机只有 chromium 缓存，headless 下启动未验证。
+  它的命令存在性预检与失败原因链由 bing-search 成功用例 + 崩溃子进程用例覆盖。
+- 两套主题都人工看过：暗色（按钮近白底近黑字）与亮色（近黑底白字）都可读；只保留
+  暗色截图作为证据。
+- 同一份文档多台服务器在**界面**上被拒绝（逐台导入）——这是 F6.9(a) 的刻意选择；
+  API 的 `entries` 批量形式仍由单测覆盖。
+
+---
+
+

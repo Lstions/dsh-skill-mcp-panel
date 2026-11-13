@@ -275,29 +275,37 @@ sections:
   ```
 
   `mcpServers` (Claude Desktop, Claude Code, Cursor) and `servers` (VS Code
-  `.vscode/mcp.json`) are both accepted, as is a bare name→server map; one
-  document may carry any number of servers. `stdio` (`command`, `args`, `env`,
-  `cwd`) and `streamable-http` (`url`, `headers`) are supported, with
-  `type: "http"` as an alias for `streamable-http`. **`sse` is refused**, because
-  this host has no SSE transport and accepting it would only move the failure to
-  connection time. `disabled: true` declares a server without connecting it.
+  `.vscode/mcp.json`) are both accepted, as is a bare name→server map. `stdio`
+  (`command`, `args`, `env`, `cwd`) and `streamable-http` (`url`, `headers`) are
+  supported, with `type: "http"` as an alias for `streamable-http`. **`sse` is
+  refused**, because this host has no SSE transport and accepting it would only
+  move the failure to connection time. `disabled: true` declares a server
+  without connecting it.
 
-  **Pasting is two steps.** The document is parsed on the host and shown as one
-  row per server with its **name (required, editable)** and **note (optional)**;
-  nothing is written and no process starts until **Import** is pressed. A raw
-  server object — `{ "command": "npx", "args": [...] }` with no wrapper — is
-  accepted exactly for this step: it has no name to import under, so the review
-  asks for one instead of inventing `server-1`. The name is what the
-  `mcp__<name>__` tool prefix is built from, and the note is what keeps two
-  similar servers apart in the list. Both are stored with the declaration and
-  remain editable through **Edit**.
+  **One form, one server — no review step.** The document, the **name
+  (required)** and the **note (optional)** sit in the same form. The name is
+  what the `mcp__<name>__` tool prefix is built from, so it is mandatory and
+  validated; a raw server object (`{ "command": "npx", "args": [...] }`) has no
+  name at all, and one is never invented (`server-1`). The note is shown in the
+  list and is how two similar servers stay distinguishable. Both live on the
+  declaration and stay editable through **Edit**. Name and note describe ONE
+  server: a document carrying several is refused with "import them one at a
+  time" (the API's `entries` form still imports a reviewed list). The write is
+  **one** settings write. A name this plugin already declares is never
+  overwritten: it reports `unchanged`, and **Edit** is the way to change that
+  server. A name owned by an outer layer is refused with the reason.
 
-  The whole document is written in **one** settings write, and each server gets
-  its own result — a bad name refuses only itself, and the page lists every row
-  (`applied`, `restart-required`, `refused` or `unchanged`). A name this plugin
-  already declares is never overwritten: it reports `unchanged`, and **Edit** is
-  the way to change that server. A name owned by an outer layer is refused with
-  the reason.
+  **The command is checked before anything is saved.** A stdio server whose
+  `command` is not on this host's PATH — or whose absolute path does not exist —
+  is refused with the reason ("command \"npx\" was not found on PATH") instead of
+  being persisted and failing later. That is the difference between "saved, no
+  tools, no idea why" and a fixable error. A disabled declaration is exempt: it
+  is not spawned now, so it may name a command installed later.
+
+  When a server does start but fails to connect, the result is
+  `restart-required` and the detail carries the client's own `cause` chain
+  (spawn failure, handshake error, closed connection), not just the wrapper
+  sentence "initial connection or tool synchronization failed".
 
   Keys other clients add (`alwaysAllow`, `inputs`, …) are ignored, and a
   `${VAR}` placeholder is stored literally: this host expands only its own
@@ -463,34 +471,33 @@ Every write is fenced:
 - **`writeAccess`** may be tightened to `loopback` in configuration.
 
 The MCP operations are `mcp.toggle`, `mcp.add`, `mcp.configure`,
-`mcp.preview`, `mcp.import` and `mcp.remove`. Two kinds answer with **more than
-one result**, one per server in document order: `mcp.preview` (what would be
-imported — nothing is written) and `mcp.import` (what was imported).
+`mcp.preview`, `mcp.import` and `mcp.remove`. `mcp.preview` (inspect without
+writing) and `mcp.import` answer with **one result per server** in document
+order; every other kind answers with one result.
 
-`mcp.preview`, and the document form of `mcp.import`, take the raw text under
-`json` or an already-parsed map under `servers`. The reviewed form — what the
-page sends after the user confirms names and notes — takes `entries`:
+The page sends a single operation per import — the document plus the name and
+note:
 
 ```json
 {
   "ops": [
     {
       "kind": "mcp.import",
-      "entries": [
-        {
-          "serverName": "playwright",
-          "note": "headless browser",
-          "config": { "transport": "stdio", "command": "npx", "args": ["@playwright/mcp@latest", "--headless"] },
-          "enabled": true
-        }
-      ]
+      "json": "{ \"mcpServers\": { \"playwright\": { \"command\": \"npx\", \"args\": [\"@playwright/mcp@latest\", \"--headless\"] } } }",
+      "name": "playwright",
+      "note": "headless browser"
     }
   ]
 }
 ```
 
-A name is required in an entry and a nameless one is refused rather than given a
-generated name; `note` is optional and bounded to 200 characters.
+`mcp.preview` and the document form of `mcp.import` take the raw text under
+`json` or an already-parsed map under `servers`. A script that already holds a
+reviewed list can still send `entries`
+(`[{ serverName, note, config, enabled }]`). A name is required in that form and
+a nameless entry is refused rather than given a generated name; `note` is
+optional and bounded to 200 characters. The stdio `command` is resolved against
+the host PATH before anything is written.
 
 ### Security — stated plainly
 
@@ -680,7 +687,7 @@ Node.js ≥ 20.13 for `fs.watch(..., { recursive: true })`, plus
 Releases are semver and every released version has a `vX.Y.Z` git tag pointing at
 the exact commit; [CHANGELOG.md](CHANGELOG.md) records what changed.
 
-**Referenceable versions start at `1.4.0`; the current version is `1.6.0`.**
+**Referenceable versions start at `1.4.0`; the current version is `1.7.0`.**
 Before `1.4.0`, this repository published some version numbers twice with
 different content:
 
