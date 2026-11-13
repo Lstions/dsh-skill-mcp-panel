@@ -564,3 +564,54 @@ boot graph 含 dsh-skill-mcp-panel/client.js
 5. **`effective` 语义**：裸宿主（无活动会话）上 depth-1 技能报 `effective=true` 是**当时事实**
    （scope 懒创建）；有真实 preset scope 时正确翻成 `effective=false`（QA 与 Lead 各自复现）。
    未做事：带**真实会话**的端到端 `effective=false` 验证。
+
+
+---
+
+## §9 v1.5.0 交付记录（2026-11-13，Lead）
+
+本轮只加一件事：**粘贴 JSON 导入 MCP 服务器**（需求 F6.8）。
+
+### 9.1 证据（每条都可复跑）
+
+| 需要证明的事 | 命令 | 结果 |
+|---|---|---|
+| 文档按作者原意解析、非法项逐条拒绝 | `node tests/verify/run.mjs f68` | PASS（20/20 断言） |
+| 一次写入、逐服务器一条结果、重复导入 unchanged | `node test/host-live.mjs` | PASS（真实插件管线 + 真实 HTTP 路由） |
+| 导入的服务器真的挂载子进程并注册工具 | `node test/mcp-live.mjs` | PASS（真实 Cordis + 真实 MCP stdio 子进程） |
+| 页面入口、原样转发、逐行结果、失败时表单保持打开 | `node test/ui-page.mjs` | PASS |
+| 文案表与实现键集合一致（文档曾写 110 / 实际 122） | `node test/ui-page.mjs` | PASS（逐键比较，已修文档） |
+
+原始观测（节选，未加工）：
+
+```
+verify: 1 passed, 0 failed, 0 blocked (of 1)
+verify: 20/20 individual assertions passed
+
+mcp-live  live import: a pasted document mounts a real child process
+  PASS  the live server really registered its tool
+  PASS  the disabled server registered nothing
+
+host-live  the whole document took ONE settings write
+  PASS a repeated import reports unchanged
+  PASS malformed JSON is refused
+```
+
+### 9.2 口径与边界（与结论一起读）
+
+- **`sse` 拒绝，不映射**：宿主的 MCP 客户端只有 `stdio` 与 `streamable-http`。
+  把 `sse` 悄悄映射成 streamable-http 会把失败推迟到连接时才暴露，所以导入直接
+  `refused` 并说明可用的替代。
+- **同名不覆盖**：本插件已声明的名字报 `unchanged`（改配置走「编辑」/
+  `mcp.configure`）；外部层占用的名字报 `refused` 并说明原因。
+- **一次写入**：整个文档一次 `set mcpServers`；写盘失败时所有被接受的条目标
+  `refused`，不会有半份文档落盘。
+- **未覆盖（不得读作通过）**：
+  1. 一个**启用**的导入条目在真实 `npx` 下载/安装场景下的耗时与失败形态未测
+     （本机测试用的是本地 fixture 子进程）。
+  2. 「导入 → 宿主重启 → 自动恢复」只经由既有 `restoreDeclared()`（F6.6 已覆盖），
+     新版本未单独重跑该链路。
+  3. 浏览器像素级渲染（N2）仍与 §8.6 第 1 条相同：无浏览器控制权。
+  4. 本机 `~/.hermes/skills` 已空，`f44` / `scale` / `perf` 三个 verify case 仍为
+     BLOCKED —— 与本次改动无关，也不能读作通过。
+

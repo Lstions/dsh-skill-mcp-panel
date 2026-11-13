@@ -2,7 +2,7 @@
 
 > 供 `lib/client.js` 直接落地为 `ctx.locale.register("skill-mcp-panel", { zh, en })`。
 >
-> **两个字典的键集合完全一致**：各 **110** 个键（本文件末尾有计数校验证）。
+> **两个字典的键集合完全一致**：各 **128** 个键（本文件末尾有计数校验证）。
 > 键名用点分层级；`{name}` / `{provider}` / `{count}` / `{reason}` 是插值占位，
 > 由 `t(key, params)` 替换 —— 不要把它们写死进译文。
 
@@ -140,6 +140,16 @@
 | `mcp.nameInvalid` | 名称只能包含字母、数字、下划线或连字符，长度 1–32 | A name may contain only letters, digits, underscores, or hyphens, 1–32 characters |
 | `mcp.nameDuplicate` | 名称「{name}」已被占用 | The name “{name}” is already in use |
 | `mcp.secretMasked` | 已隐藏（保存时保留原值） | Hidden — the stored value is kept on save |
+| `mcp.hint.stdio` | 参数与环境变量每行一个；掩码的密钥在保存时保留原值。 | Arguments and environment are one entry per line; a masked secret keeps its stored value on save. |
+| `mcp.hint.http` | 请求头每行一个 KEY: VALUE；掩码的密钥在保存时保留原值。 | Headers are one KEY: VALUE per line; a masked secret keeps its stored value on save. |
+| `mcp.save` | 保存 | Save |
+| `mcp.create` | 添加 | Add |
+| `mcp.import.button` | 导入 JSON | Import JSON |
+| `mcp.import.title` | MCP JSON | MCP JSON |
+| `mcp.import.submit` | 导入 | Import |
+| `mcp.import.unnamed` | 文档 | document |
+| `mcp.import.hint` | 粘贴 mcpServers（或 servers）文档。支持 stdio 与 streamable-http，不支持 sse；本插件已声明过的同名服务器不会被覆盖。 | Paste an mcpServers (or servers) document. stdio and streamable-http are supported; sse is not. A name this plugin already declares is left untouched. |
+| `mcp.import.placeholder` | 见实现（一段 mcpServers 示例，两语相同） | see implementation (an mcpServers example, identical in both) |
 
 ## 配置分区
 
@@ -162,42 +172,45 @@
 
 ## 计数校验
 
-两个字典必须各含以下 **110** 个键，且集合完全相等：
+页面字典（`UI_ZH` / `UI_EN`）必须各含以下 **128** 个键，且集合完全相等：
 
 ```
-tab.label, page.title, page.subtitle, page.refresh, page.loading,
-page.section.skills, page.section.conflicts, page.section.mcp, page.section.config,
-status.applied, status.restartRequired, status.refused, status.unchanged,
-status.working, status.stale, status.staleRetry,
-error.load, error.loadDetail, error.retry, error.write, error.unavailable,
-empty.skills, empty.conflicts, empty.mcp, empty.search,
-skills.count, skills.disabledCount, skills.ineffectiveCount, skills.search,
-skills.searchPlaceholder, skills.filterRoot, skills.filterRootAll,
-skills.group.expand, skills.group.collapse, skills.group.count, skills.uncategorised,
-skills.toggle.enable, skills.toggle.disable,
+tab.label, page.title, page.subtitle, page.refresh, page.loading, page.section.skills,
+page.section.conflicts, page.section.mcp, page.section.config, status.applied,
+status.restartRequired, status.refused, status.unchanged, status.working, status.stale,
+status.staleRetry, error.load, error.loadDetail, error.retry, error.write,
+error.unavailable, empty.skills, empty.conflicts, empty.mcp, empty.search, skills.count,
+skills.disabledCount, skills.ineffectiveCount, skills.search, skills.searchPlaceholder,
+skills.filterRoot, skills.filterRootAll, skills.group.expand, skills.group.collapse,
+skills.group.count, skills.uncategorised, skills.toggle.enable, skills.toggle.disable,
 skills.state.enabled, skills.state.disabled, skills.state.shadowed,
-skills.state.shadowedHint, skills.state.ineffective,
-skills.field.path, skills.field.root, skills.field.category, skills.field.provider,
-skills.field.rank, skills.field.model, skills.field.user,
-skills.bulk.disableGroup, skills.bulk.enableGroup, skills.bulk.result,
-conflicts.count, conflicts.policy, conflicts.policy.firstWins, conflicts.policy.error,
-conflicts.winner, conflicts.loser, conflicts.resolvable, conflicts.unresolvable,
-conflicts.explain.firstWins, conflicts.explain.error,
-mcp.count, mcp.add, mcp.edit, mcp.remove, mcp.cancel, mcp.confirmRemove,
-mcp.toggle.enable, mcp.toggle.disable,
-mcp.field.serverName, mcp.field.transport, mcp.field.command, mcp.field.args,
-mcp.field.env, mcp.field.cwd, mcp.field.url, mcp.field.headers,
-mcp.field.timeout, mcp.field.failOnStartup,
-mcp.target, mcp.phase, mcp.tools.count, mcp.tools.none, mcp.tools.list,
-mcp.declared.own, mcp.declared.external,
-mcp.readonly.managementRequired, mcp.readonly.unaddressable,
-mcp.external.immutable, mcp.unavailable, mcp.managerUnavailable,
-mcp.nameInvalid, mcp.nameDuplicate, mcp.secretMasked,
-config.roots, config.rootsHint, config.rootsMissing, config.maxDepth, config.rank,
-config.duplicatePolicy, config.includeHidden, config.includeFlatRootFiles,
-config.watch, config.watchDebounceMs, config.providerName,
-config.save, config.saved, config.dirty
+skills.state.shadowedHint, skills.state.ineffective, skills.field.path,
+skills.field.root, skills.field.category, skills.field.provider, skills.field.rank,
+skills.field.model, skills.field.user, skills.bulk.disableGroup, skills.bulk.enableGroup,
+skills.bulk.result, conflicts.count, conflicts.policy, conflicts.policy.firstWins,
+conflicts.policy.error, conflicts.winner, conflicts.loser, conflicts.resolvable,
+conflicts.unresolvable, conflicts.explain.firstWins, conflicts.explain.error, mcp.count,
+mcp.add, mcp.edit, mcp.remove, mcp.cancel, mcp.confirmRemove, mcp.toggle.enable,
+mcp.toggle.disable, mcp.field.serverName, mcp.field.transport, mcp.field.command,
+mcp.field.args, mcp.field.env, mcp.field.cwd, mcp.field.url, mcp.field.headers,
+mcp.field.timeout, mcp.field.failOnStartup, mcp.target, mcp.phase, mcp.tools.count,
+mcp.tools.none, mcp.tools.list, mcp.declared.own, mcp.declared.external,
+mcp.readonly.managementRequired, mcp.readonly.unaddressable, mcp.external.immutable,
+mcp.unavailable, mcp.managerUnavailable, mcp.nameInvalid, mcp.nameDuplicate,
+mcp.secretMasked, mcp.hint.stdio, mcp.hint.http, mcp.save, mcp.create, mcp.import.button,
+mcp.import.title, mcp.import.submit, mcp.import.unnamed, mcp.import.hint,
+mcp.import.placeholder, config.roots, config.rootsHint, config.rootsMissing,
+config.maxDepth, config.rank, config.duplicatePolicy, config.includeHidden,
+config.includeFlatRootFiles, config.watch, config.watchDebounceMs, config.providerName,
+config.writeAccess, config.writeAccessHint, writeAccessSameOrigin, writeAccessLoopback,
+config.editHint, config.reset, config.policyHint, config.rootsHintPage, config.save,
+config.saved, config.dirty
 ```
 
-上面这张清单必须与实现里的 `Object.keys(zh)` / `Object.keys(en)` **逐字相等**。
-`test/ui-i18n.mjs` 会断言两件事：两字典键集合相等；且这个清单里的每个键都在实现中存在。
+这张清单必须与实现里的 `UI_ZH` / `UI_EN` 键集合**完全相等**（比较时忽略顺序）。
+`test/ui-page.mjs` 断言三件事：两字典键集合相等；清单与实现的键集合相等；
+本文件声明的数量等于实现里的键数。
+
+这条检查是补上的，因为文档曾经是错的：它写「110 个键」，实现里却已经有 122 个，
+清单还漏掉了 `mcp.hint.stdio`、`mcp.hint.http`、`mcp.save`、`mcp.create` 四个键。
+一个没有任何东西执行的数量声明，等于没有声明。

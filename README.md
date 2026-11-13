@@ -263,6 +263,39 @@ sections:
   usable, because the host rejects a duplicate name and the name is what the
   operation addresses.
 
+  **Import JSON** accepts the configuration document every other MCP client
+  already uses, so an existing server can be pasted instead of retyped:
+
+  ```json
+  {
+    "mcpServers": {
+      "bing-search": { "command": "npx", "args": ["-y", "bing-cn-mcp"] }
+    }
+  }
+  ```
+
+  `mcpServers` (Claude Desktop, Claude Code, Cursor) and `servers` (VS Code
+  `.vscode/mcp.json`) are both accepted, as is a bare name→server map; one
+  document may carry any number of servers. `stdio` (`command`, `args`, `env`,
+  `cwd`) and `streamable-http` (`url`, `headers`) are supported, with
+  `type: "http"` as an alias for `streamable-http`. **`sse` is refused**, because
+  this host has no SSE transport and accepting it would only move the failure to
+  connection time. `disabled: true` declares a server without connecting it.
+
+  The whole document is written in **one** settings write, and each server gets
+  its own result — a bad name refuses only itself, and the page lists every row
+  (`applied`, `restart-required`, `refused` or `unchanged`). A name this plugin
+  already declares is never overwritten: it reports `unchanged`, and **Edit** is
+  the way to change that server. A name owned by an outer layer is refused with
+  the reason.
+
+  Keys other clients add (`alwaysAllow`, `inputs`, …) are ignored, and a
+  `${VAR}` placeholder is stored literally: this host expands only its own
+  `${credential:NAME}` templates, and only for a row that enables template
+  expansion. The fields that carry over are `command`, `args`, `env`, `cwd`,
+  `url`, `headers`, `type`, `disabled`, plus `toolCallTimeoutMs`,
+  `failOnStartupError` and `reconnect` when the document supplies them.
+
   Secrets are never round-tripped in the clear: the host masks a secret-looking
   value before sending it, and turns a submitted mask back into the stored value,
   so an untouched field keeps its secret.
@@ -419,6 +452,25 @@ Every write is fenced:
   content type without a preflight it will not pass.
 - **`writeAccess`** may be tightened to `loopback` in configuration.
 
+The MCP operations are `mcp.toggle`, `mcp.add`, `mcp.configure`, `mcp.import`
+and `mcp.remove`. `mcp.import` is the only kind that answers with **more than
+one result** — one per server in the pasted document, in document order — and
+it accepts either the raw text under `json` or an already-parsed map under
+`servers`, so a script can use the same path the page uses:
+
+```json
+{
+  "ops": [
+    {
+      "kind": "mcp.import",
+      "servers": {
+        "playwright": { "command": "npx", "args": ["@playwright/mcp@latest", "--headless"] }
+      }
+    }
+  ]
+}
+```
+
 ### Security — stated plainly
 
 These endpoints are **not authenticated**. They are served to anything that can
@@ -546,8 +598,8 @@ node test/host-http.mjs               # the wire contract: origin gate, status c
 node test/host-live.mjs               # toggle end to end + real-tree scale and P95
 
 # MCP (real Cordis tree, real MCP stdio server)
-node test/mcp-inventory.mjs           # discovery, masking, validation, status mapping
-node test/mcp-live.mjs                # mount, tool registration, dispose, dead servers
+node test/mcp-inventory.mjs           # discovery, masking, validation, status mapping, JSON import
+node test/mcp-live.mjs                # mount, tool registration, dispose, dead servers, JSON import
 ```
 
 `npm test` also runs the independent adversarial suite in `tests/verify`, which
@@ -566,7 +618,9 @@ and reads the result back out of the live catalog.
 `test/mcp-live.mjs` mounts `@deepseek-ai/dsh-mcp-client` for real against a real
 MCP stdio server process, and asserts the tool appears in the registry and
 disappears on dispose. It also pins the honesty requirement: a server whose
-command does not exist must report `restart-required`, never `applied`.
+command does not exist must report `restart-required`, never `applied`. The JSON
+import is exercised on the same real path: a pasted document mounts a real child
+process, registers its tool, and leaves a `disabled: true` sibling unstarted.
 
 `test/namespace-check.mjs` boots the deployment's actual
 `@deepseek-ai/dsh-settings-file` provider, so it proves `installSection`
@@ -605,7 +659,7 @@ Node.js ≥ 20.13 for `fs.watch(..., { recursive: true })`, plus
 Releases are semver and every released version has a `vX.Y.Z` git tag pointing at
 the exact commit; [CHANGELOG.md](CHANGELOG.md) records what changed.
 
-**Referenceable versions start at `1.4.0`; the current version is `1.4.4`.**
+**Referenceable versions start at `1.4.0`; the current version is `1.5.0`.**
 Before `1.4.0`, this repository published some version numbers twice with
 different content:
 

@@ -301,6 +301,60 @@ section('live add of a DEAD server: never reported as applied')
 }
 
 // ---------------------------------------------------------------------------
+section('live import: a pasted document mounts a real child process')
+
+// The JSON import path must end in the SAME real mount as `mcp.add` — a parser
+// that produces plausible objects but never starts anything would pass every
+// offline assertion and still be useless. This drives the real fixture server.
+{
+	const before = declared.length
+	const document = JSON.stringify({
+		mcpServers: {
+			'pasted-one': {
+				command: process.execPath,
+				args: [FIXTURE],
+				env: { IMPORT_PROBE: 'yes' }
+			},
+			'pasted-two': {
+				type: 'stdio',
+				command: process.execPath,
+				args: [FIXTURE],
+				disabled: true
+			}
+		}
+	})
+	const results = await manager.apply({ kind: OP.MCP_IMPORT, json: document })
+	check('one result per pasted server', results.length, 2)
+	check('the live server is applied', results[0].status, STATUS.APPLIED)
+	check('the disabled server is declared without connecting', results[1].status, STATUS.APPLIED)
+	check('the live server really registered its tool', Boolean(ctx.get('tools').get('mcp__pasted-one__ping')), true)
+	check('the disabled server registered nothing', ctx.get('tools').schemas().some((s) => s.name.startsWith('mcp__pasted-two__')), false)
+	check('both declarations are stored', declared.length, before + 2)
+	const stored = declared.find((item) => item.serverName === 'pasted-one')
+	check('the pasted env reached the stored config', stored.config.env.IMPORT_PROBE, 'yes')
+	check('the disabled declaration carries enabled=false', declared.find((item) => item.serverName === 'pasted-two').enabled, false)
+	const importedInventory = await manager.describe()
+	// The outer-layer `external` server is still mounted at this point, so the
+	// assertion is scoped to what the import created.
+	check(
+		'describe lists both imported servers',
+		importedInventory.servers.map((server) => server.serverName).filter((name) => name.startsWith('pasted-')),
+		['pasted-one', 'pasted-two']
+	)
+	check('the live one reports its real tool count', importedInventory.servers.find((server) => server.serverName === 'pasted-one').toolCount, 1)
+
+	// Re-importing the same document must not duplicate or overwrite anything.
+	const again = await manager.apply({ kind: OP.MCP_IMPORT, json: document })
+	check('a repeated import is unchanged', again.map((result) => result.status), [STATUS.UNCHANGED, STATUS.UNCHANGED])
+	check('a repeated import declared nothing new', declared.length, before + 2)
+
+	const cleanupLive = await manager.apply({ kind: OP.MCP_REMOVE, serverName: 'pasted-one' })
+	check('the imported server can be removed', cleanupLive.status, STATUS.APPLIED)
+	check('its tool left the registry', ctx.get('tools').schemas().some((s) => s.name.startsWith('mcp__pasted-one__')), false)
+	await manager.apply({ kind: OP.MCP_REMOVE, serverName: 'pasted-two' })
+}
+
+// ---------------------------------------------------------------------------
 section('live dispose: every owned mount is released')
 
 await manager.dispose()

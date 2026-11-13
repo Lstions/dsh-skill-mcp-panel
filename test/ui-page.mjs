@@ -284,13 +284,13 @@ function makeFetch(state, options = {}) {
     }
     if (options.writeFails === true) return { ok: false, status: 403, json: async () => ({}) }
     const body = JSON.parse(init.body)
-    const results = body.ops.map((op) => ({
-      kind: op.kind,
-      ok: true,
-      status: options.status ?? 'applied',
-      detail: 'ok',
-      target: op.name,
-    }))
+    const results = []
+    for (const op of body.ops) {
+      // An import answers with one result PER SERVER, not one per op: the page
+      // must render every row, so the double has to model that shape.
+      if (op.kind === 'mcp.import' && Array.isArray(options.importResults)) results.push(...options.importResults)
+      else results.push({ kind: op.kind, ok: true, status: options.status ?? 'applied', detail: 'ok', target: op.name })
+    }
     const next = makeState({ revision: state.revision + 1 })
     if (options.status === 'applied') {
       for (const op of body.ops) {
@@ -712,9 +712,25 @@ function makeLocale(active = 'en') {
   const zhKeys = Object.keys(table.zh).sort()
   const enKeys = Object.keys(table.en).sort()
   check('zh and en key sets are identical', JSON.stringify(zhKeys), JSON.stringify(enKeys))
-  // The page copy is generated from docs/copy-zh-en.md; the card contributes its
-  // own keys on top, so the merged table is a superset of the copy table.
-  check('the merged dictionary carries the full page copy table', zhKeys.length >= 110, true)
+  // The page copy comes from docs/copy-zh-en.md. The card contributes its own
+  // keys on top, so the merged table is a superset of the copy table — the
+  // comparison therefore reads the page dictionaries out of the bundle rather
+  // than the merged table. This used to be a `>= 110` smoke check while the doc
+  // actually disagreed with the code (it said 110; there were 122, and four keys
+  // were missing from its list), so it is an exact assertion now.
+  const pageKeys = (() => {
+    const start = source.indexOf('const UI_EN = {')
+    const end = source.indexOf('\n};', start)
+    return [...source.slice(start, end).matchAll(/^\s+"([^"]+)":/gm)].map((match) => match[1])
+  })()
+  const copy = readFileSync(join(here, '..', 'docs', 'copy-zh-en.md'), 'utf8')
+  const fence = copy.slice(copy.indexOf('## 计数校验'))
+  const listed = [...fence.matchAll(/^[a-z][A-Za-z0-9_.]*(?:, [a-z][A-Za-z0-9_.]*)*,?$/gm)]
+    .flatMap((line) => line[0].replace(/,$/, '').split(', '))
+    .filter((key) => key !== '')
+  check('the copy table lists exactly the page keys', [...listed].sort(), [...pageKeys].sort())
+  check('the copy table states the real key count', /各 \*\*(\d+)\*\* 个键/.exec(copy)?.[1], String(pageKeys.length))
+  check('the merged dictionary carries the full page copy table', zhKeys.length >= pageKeys.length, true)
   check('every key has a non-empty zh value', zhKeys.every((k) => typeof table.zh[k] === 'string' && table.zh[k].length > 0), true)
   check('every key has a non-empty en value', enKeys.every((k) => typeof table.en[k] === 'string' && table.en[k].length > 0), true)
   check('no key survived as its own placeholder in en', enKeys.every((k) => table.en[k] !== k), true)
@@ -879,6 +895,56 @@ function makeLocale(active = 'en') {
   check('the op names the new server', body.ops[0].serverName, 'fixture')
   check('the op carries the transport', body.ops[0].config.transport, 'stdio')
   check('the op carries the command', body.ops[0].config.command, 'node')
+}
+
+// ─ 18b. MCP 可以粘贴 JSON 导入 ─────────────────────────────────────────────
+// 用户手上通常已经有一段现成的 mcpServers 配置（Claude / Cursor / VS Code）。
+// 这一节守住两件事：页面把原始文本原样发给主机（解析只在主机侧，页面不另做
+// 一套规则），以及**逐服务器**的结果都显示出来 —— 导入可能部分成功，只显示
+// 第一条会把失败项藏起来。
+{
+  const page = await mountPage(
+    makeState({ mcp: { servers: [], managerAvailable: true, mcpClientAvailable: true } }),
+    {
+      importResults: [
+        { kind: 'mcp.import', ok: true, status: 'applied', detail: '"bing-search" was added and is connected; 1 tool(s) are registered.', target: 'bing-search' },
+        { kind: 'mcp.import', ok: false, status: 'refused', detail: '"bad/name" is not a valid serverName', target: 'bad/name' },
+      ],
+    },
+  )
+  const open = buttons(page.tree).find((node) => textOf(node) === 'Import JSON')
+  check('an Import JSON control is offered', open !== undefined, true)
+  open.props.onClick()
+  await page.settle()
+
+  const textarea = textareas(page.tree).find((node) => node.props.id === 'skill-mcp-panel-mcp-import-json')
+  check('the import form reveals a JSON textarea', textarea !== undefined, true)
+  check('the textarea is empty and the submit control is disabled', buttons(page.tree).find((node) => textOf(node) === 'Import')?.props.disabled, true)
+  check('the placeholder shows the canonical mcpServers shape', String(textarea.props.placeholder).includes('mcpServers'), true)
+
+  const document = JSON.stringify({ mcpServers: { 'bing-search': { command: 'npx', args: ['-y', 'bing-cn-mcp'] } } })
+  textarea.props.onChange({ target: { value: document } })
+  await page.settle()
+  const submit = buttons(page.tree).find((node) => textOf(node) === 'Import')
+  check('the submit control becomes available once text is pasted', submit?.props.disabled, false)
+  submit.props.onClick()
+  await page.settle()
+
+  const posted = page.fetchImpl.calls.filter((call) => call.input === '/skill-mcp-panel/apply').pop()
+  check('importing writes through the apply route', posted !== undefined, true)
+  const body = JSON.parse(posted.init.body)
+  check('the write carries an mcp.import op', body.ops[0].kind, 'mcp.import')
+  // 原样转发：页面不做 pre-parse，否则两边对同一段文本会给出不同的拒绝理由。
+  check('the pasted text is sent verbatim', body.ops[0].json, document)
+
+  const text = allText(page.tree)
+  check('every imported server is reported', text.includes('bing-search') && text.includes('bad/name'), true)
+  check('an applied server reads as applied', text.includes('Applied'), true)
+  check('a refused server reads as refused', text.includes('Refused'), true)
+  check('the host detail is shown verbatim', text.includes('not a valid serverName'), true)
+
+  // 有失败项时表单必须留着，用户要就地改那段 JSON；否则错误一消失就没法修。
+  check('a partially failed import keeps the form open', textareas(page.tree).some((node) => node.props.id === 'skill-mcp-panel-mcp-import-json'), true)
 }
 
 // ─ 19. MCP 可以修改：行内编辑发出 mcp.configure ──────────────────────────

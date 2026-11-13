@@ -158,6 +158,14 @@ provider、rank、是否可被模型调用、是否可被用户调用。
 - F6.6 声明持久化，宿主重启后仍在。
 - F6.7 **降级**：当环境里没有 `@deepseek-ai/dsh-mcp-client` 时，
   界面显示明确说明（如「未安装 MCP 客户端」），而不是报错崩溃或假装可用。
+- F6.8 **JSON 导入**：支持粘贴其它客户端通用的 `mcpServers` 文档（一次可含多台），
+  也接受 VS Code 的 `servers` 外层键与裸「名字 → 配置」映射；`stdio` 与
+  `streamable-http` 都支持，`sse` 明确拒绝（宿主没有该传输，不得假装接受）。
+  整个文档**一次写入**；每台服务器各自一条结果（`applied` / `restart-required` /
+  `refused` / `unchanged`），一台失败不影响其它台。已由本插件声明的同名服务器
+  不得被覆盖（报 `unchanged`），外部层占用的名字报 `refused` 并说明原因。
+  解析在主机侧完成、界面原样转发文本 —— 页面与 HTTP API 对同一段文本必须给出
+  相同结论。
 
 > F6.3 的判定方式由开发在实现时**实测确定**并写入文档：
 > 先试动态挂载（loader 解析模块 + `ctx.plugin()` 挂载），成功则 `applied`；

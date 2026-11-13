@@ -261,6 +261,69 @@ const modelNames = async (booted) =>
   await booted.close()
 }
 
+// ─ 5b. a JSON import: one result per server, ONE settings write ──────────
+// 用户粘贴的是一整段 mcpServers 配置。它必须按【一个文档一次写】落盘 —— 逐台
+// 服务器写会在中途失败时留下一半导入的状态 —— 同时每台服务器的结果都要回来，
+// 因为其中可能有名字冲突或格式错误。
+{
+  const booted = await boot([root])
+  const writes = []
+  const originalWrite = booted.settings.write
+  const counted = (ops) => {
+    writes.push(ops)
+    originalWrite(ops)
+  }
+  booted.settings.write = counted
+  booted.settings.settings.mutate = async (_ns, ops) => counted(ops)
+
+  const document = JSON.stringify({
+    mcpServers: {
+      'bing-search': { command: 'npx', args: ['-y', 'bing-cn-mcp'], disabled: true },
+      playwright: { command: 'npx', args: ['@playwright/mcp@latest', '--headless'], disabled: true },
+    },
+  })
+  const response = await booted.request(ROUTE_APPLY, {
+    method: 'POST',
+    headers: booted.writeHeaders(),
+    body: JSON.stringify({ ops: [{ kind: 'mcp.import', json: document }] }),
+  })
+  check('the import is accepted', response.status, 200)
+  check('it returns one result per pasted server', response.body.results.length, 2)
+  check('both servers are declared', response.body.results.map((r) => r.status), [STATUS.APPLIED, STATUS.APPLIED])
+  check('the results name their servers', response.body.results.map((r) => r.target), ['bing-search', 'playwright'])
+  check('the whole document took ONE settings write', writes.length, 1)
+  check(
+    'the declarations landed in the settings document',
+    booted.settings.resolved().mcpServers.map((entry) => entry.serverName),
+    ['bing-search', 'playwright'],
+  )
+  check(
+    'the echoed state lists the imported servers',
+    response.body.state.mcp.servers.map((server) => server.serverName),
+    ['bing-search', 'playwright'],
+  )
+
+  // Re-importing the same document is a no-op, honestly reported.
+  const beforeRepeat = writes.length
+  const again = await booted.request(ROUTE_APPLY, {
+    method: 'POST',
+    headers: booted.writeHeaders(),
+    body: JSON.stringify({ ops: [{ kind: 'mcp.import', json: document }] }),
+  })
+  check('a repeated import reports unchanged', again.body.results.map((r) => r.status), [STATUS.UNCHANGED, STATUS.UNCHANGED])
+  check('a repeated import writes nothing', writes.length, beforeRepeat)
+
+  // A document that cannot be used is refused with a reason, not a crash.
+  const broken = await booted.request(ROUTE_APPLY, {
+    method: 'POST',
+    headers: booted.writeHeaders(),
+    body: JSON.stringify({ ops: [{ kind: 'mcp.import', json: '{"mcpServers":' }] }),
+  })
+  check('malformed JSON is refused', broken.body.results[0].status, STATUS.REFUSED)
+  checkTrue('the refusal explains the parse failure', /not valid JSON/i.test(broken.body.results[0].detail))
+  await booted.close()
+}
+
 // ─ 6. a read-only host refuses writes instead of pretending ──────────────
 {
   const registry = await bootRegistry()

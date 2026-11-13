@@ -38,6 +38,7 @@ const CASE_FILES = [
   'f33',
   'f44',
   'f63',
+  'f68',
   'scale',
   'n4',
   'n4nested',

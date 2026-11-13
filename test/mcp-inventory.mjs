@@ -10,7 +10,7 @@
  *
  * Usage: node test/mcp-inventory.mjs
  */
-import { createMcpManager, normalizeConfig, describeTarget, redactUrl, SERVER_NAME_PATTERN } from '../lib/mcp.js'
+import { createMcpManager, normalizeConfig, describeTarget, redactUrl, parseMcpServers, SERVER_NAME_PATTERN } from '../lib/mcp.js'
 import { OP, STATUS, SECRET_MASK } from '../lib/contract.js'
 
 let failures = 0
@@ -72,7 +72,7 @@ function makeLoader(rows, options = {}) {
 }
 
 /** Build a manager over a fake context. Every dep is overridable per test. */
-function makeManager({ tools, loader, pluginManager, declared = [], config = {}, onWrite, ctxExtra = {}, module } = {}) {
+function makeManager({ tools, loader, pluginManager, declared = [], config = {}, onWrite, writeThrows = false, onMount, ctxExtra = {}, module } = {}) {
 	const state = { declared: declared.map((item) => structuredClone(item)) }
 	let lastWrite
 	const ctx = {
@@ -84,17 +84,21 @@ function makeManager({ tools, loader, pluginManager, declared = [], config = {},
 			return undefined
 		},
 		plugin(plugin, pluginConfig) {
+			// `registered` models the real client's generation: a mount publishes
+			// tools and its disposal withdraws them. Without that, a test could
+			// count tools for a server it had already removed.
+			const registered = []
 			const fiber = {
 				config: pluginConfig,
 				plugin,
 				disposed: false,
+				registered,
 				async dispose() {
 					fiber.disposed = true
-					// Model the real client: registering tools is asynchronous work.
-					options?.onMount?.(pluginConfig, tools)
+					for (const name of registered) tools?.remove?.(name)
 				}
 			}
-			options?.onMount?.(pluginConfig, tools)
+			onMount?.(pluginConfig, tools, registered)
 			return fiber
 		},
 		...ctxExtra
@@ -103,6 +107,7 @@ function makeManager({ tools, loader, pluginManager, declared = [], config = {},
 		ctx,
 		readDeclared: () => state.declared,
 		writeDeclared: (next) => {
+			if (writeThrows) throw new Error('disk is full')
 			lastWrite = structuredClone(next)
 			state.declared = structuredClone(next)
 			onWrite?.(next)
@@ -521,6 +526,209 @@ section('removal refuses an outer row and accepts a declared one')
 	const { manager } = makeManager({ tools, loader })
 	const outcome = await manager.apply({ kind: OP.MCP_CONFIGURE, serverName: 'outer', config: { transport: 'stdio', command: 'y' } })
 	check('an outer row cannot be configured here', outcome.status, STATUS.REFUSED)
+}
+
+// ---------------------------------------------------------------------------
+section('JSON import: documents copied out of other MCP clients')
+
+{
+	// The exact shape a user copies from Claude Desktop / Cursor / Claude Code.
+	const document = JSON.stringify({
+		mcpServers: {
+			'bing-search': { command: 'npx', args: ['-y', 'bing-cn-mcp'] },
+			playwright: { command: 'npx', args: ['@playwright/mcp@latest', '--headless'] }
+		}
+	})
+	const parsed = parseMcpServers(document)
+	check('both servers are parsed', parsed.servers.map((server) => server.serverName), ['bing-search', 'playwright'])
+	check('the first is normalised to stdio', parsed.servers[0].config, {
+		transport: 'stdio',
+		command: 'npx',
+		args: ['-y', 'bing-cn-mcp'],
+		env: {},
+		cwd: ''
+	})
+	check('the second keeps its flags', parsed.servers[1].config.args, ['@playwright/mcp@latest', '--headless'])
+	check('no errors are reported', parsed.errors, [])
+	check('entries preserve document order', parsed.entries.map((entry) => entry.serverName), ['bing-search', 'playwright'])
+}
+
+{
+	// VS Code (`servers`) plus the `http` type spelling.
+	const vscode = parseMcpServers({
+		servers: {
+			remote: { type: 'http', url: 'https://mcp.example.test/mcp', headers: { Authorization: 'Bearer x' } }
+		}
+	})
+	check('the "servers" wrapper is accepted', vscode.servers[0].serverName, 'remote')
+	check('type "http" maps onto streamable-http', vscode.servers[0].config.transport, 'streamable-http')
+	check('a header survives the import', vscode.servers[0].config.headers, { Authorization: 'Bearer x' })
+
+	const bare = parseMcpServers({ plain: { command: 'node', args: 'server.mjs' } })
+	check('a bare name map is accepted', bare.servers[0].serverName, 'plain')
+	check('a single string arg is wrapped', bare.servers[0].config.args, ['server.mjs'])
+
+	const typed = parseMcpServers({ local: { type: 'stdio', command: 'node' } })
+	check('an explicit stdio type is honoured', typed.servers[0].config.transport, 'stdio')
+	check('omitted args default to an empty list', typed.servers[0].config.args, [])
+
+	// A remote entry without a type is inferred from `url`, which is what
+	// Cursor documents rely on.
+	const inferred = parseMcpServers({ cursorish: { url: 'https://c.test/mcp' } })
+	check('a url-only entry is inferred as streamable-http', inferred.servers[0].config.transport, 'streamable-http')
+}
+
+{
+	const off = parseMcpServers({
+		off: { command: 'node', disabled: true },
+		off2: { command: 'node', enabled: false },
+		on: { command: 'node' }
+	})
+	check('disabled:true declares the server disabled', off.servers[0].enabled, false)
+	check('enabled:false declares the server disabled', off.servers[1].enabled, false)
+	check('an entry without a flag is enabled', off.servers[2].enabled, true)
+}
+
+{
+	// Refusals must name the problem and never throw.
+	const cases = [
+		['an empty document', '', /empty/],
+		['malformed JSON', '{"mcpServers": ', /not valid JSON/],
+		['two documents pasted in a row', '{"mcpServers": {}}\n{"mcpServers": {}}', /one document at a time/],
+		['an array', '[{"name":"x"}]', /not an array/],
+		['a server without a name', { command: 'npx' }, /server name is required/],
+		['an empty map', { mcpServers: {} }, /no servers were found/],
+		['a wrapper that is not an object', { mcpServers: [] }, /"mcpServers" must be an object/],
+		['an illegal name', { 'bad.name': { command: 'npx' } }, /not a valid serverName/],
+		['the sse transport', { x: { type: 'sse', url: 'https://x.test/sse' } }, /"sse" transport/],
+		['an unknown transport', { x: { type: 'carrier-pigeon', command: 'npx' } }, /unsupported transport/],
+		['neither command nor url', { x: {} }, /neither "command"/],
+		['non-string args', { x: { command: 'npx', args: ['-y', 3] } }, /args must contain strings/],
+		['a null env value', { x: { command: 'npx', env: { A: null } } }, /env\.A must be a string/],
+		['a malformed url', { x: { url: 'not a url' } }, /not a valid absolute URL/]
+	]
+	for (const [label, input, pattern] of cases) {
+		const parsed = parseMcpServers(input)
+		check(`${label}: refused`, parsed.servers.length === 0 && parsed.errors.length === 1, true)
+		check(`${label}: the reason is actionable`, pattern.test(parsed.errors[0]?.error ?? ''), true)
+	}
+}
+
+{
+	// Partial success is deliberate: one bad key must not discard the good ones.
+	const mixed = parseMcpServers({ good: { command: 'node' }, 'bad name': { command: 'node' } })
+	check('a valid entry survives a sibling error', mixed.servers.map((server) => server.serverName), ['good'])
+	check('the bad entry is reported by name', mixed.errors[0].serverName, 'bad name')
+	check('entries keep document order', mixed.entries.map((entry) => entry.serverName), ['good', 'bad name'])
+}
+
+// ---------------------------------------------------------------------------
+section('JSON import: one persist, one result per server, honest statuses')
+
+/** A mount that publishes the same one tool per server, so no wait is needed. */
+function mountPublishesOneTool(config, tools, registered) {
+	const name = `mcp__${config.serverName}__ping`
+	tools.add(name)
+	registered?.push(name)
+}
+
+{
+	const tools = makeTools([])
+	const { manager, state, getLastWrite } = makeManager({
+		tools,
+		loader: makeLoader([]),
+		onMount: mountPublishesOneTool
+	})
+	const results = await manager.apply({
+		kind: OP.MCP_IMPORT,
+		json: JSON.stringify({
+			mcpServers: {
+				'bing-search': { command: 'npx', args: ['-y', 'bing-cn-mcp'] },
+				playwright: { command: 'npx', args: ['@playwright/mcp@latest', '--headless'] }
+			}
+		})
+	})
+
+	check('one result per pasted server', results.length, 2)
+	check('both are applied', results.map((result) => result.status), [STATUS.APPLIED, STATUS.APPLIED])
+	check('results are addressed by server name', results.map((result) => result.target), ['bing-search', 'playwright'])
+	check('the live tool count is reported', results[0].detail.includes('1 tool'), true)
+	check('the whole document is persisted once', getLastWrite().length, 2)
+	check('both declarations are stored', state.declared.map((item) => item.serverName), ['bing-search', 'playwright'])
+	check('the stored config is normalised', state.declared[0].config.args, ['-y', 'bing-cn-mcp'])
+	const inventory = await manager.describe()
+	check('imported servers appear in the inventory', inventory.servers.map((server) => server.serverName), ['bing-search', 'playwright'])
+	check('the imported servers are declared', inventory.servers.every((server) => server.declared === true), true)
+}
+
+{
+	// A name that already exists must not be silently overwritten.
+	const { manager, getLastWrite, state } = makeManager({ tools: makeTools([]), declared: [STDIO_DECL], loader: makeLoader([]) })
+	const results = await manager.apply({ kind: OP.MCP_IMPORT, json: { 'local-tools': { command: 'node' } } })
+	check('an already-declared name is unchanged', results[0].status, STATUS.UNCHANGED)
+	check('the existing declaration is untouched', state.declared[0].config.command, 'node')
+	check('nothing was written', getLastWrite(), undefined)
+}
+
+{
+	// A name an outer layer owns cannot be declared here.
+	const loader = makeLoader([{ id: '1', name: '@deepseek-ai/dsh-mcp-client', config: { transport: 'stdio', serverName: 'taken', command: 'x' }, phase: 2 }])
+	const { manager, getLastWrite } = makeManager({ tools: makeTools([]), loader })
+	const results = await manager.apply({ kind: OP.MCP_IMPORT, json: { taken: { command: 'node' } } })
+	check('an outer-layer name is refused', results[0].status, STATUS.REFUSED)
+	check('the refusal names the owning layer', results[0].detail.includes('outer composition layer'), true)
+	check('an outer collision wrote nothing', getLastWrite(), undefined)
+}
+
+{
+	// A mixed document: valid, invalid and disabled entries, one result each.
+	const tools = makeTools([])
+	const { manager, state } = makeManager({ tools, loader: makeLoader([]), onMount: mountPublishesOneTool })
+	const results = await manager.apply({
+		kind: OP.MCP_IMPORT,
+		json: {
+			good: { command: 'node' },
+			'bad/name': { command: 'node' },
+			off: { command: 'node', disabled: true }
+		}
+	})
+	check('three results, in document order', results.map((result) => result.target), ['good', 'bad/name', 'off'])
+	check('the valid server was added', results[0].status, STATUS.APPLIED)
+	check('the invalid name was refused', results[1].status, STATUS.REFUSED)
+	check('a disabled entry is declared, not mounted', results[2].status, STATUS.APPLIED)
+	check('only the valid entries were stored', state.declared.map((item) => item.serverName), ['good', 'off'])
+	check('the disabled entry is stored disabled', state.declared[1].enabled, false)
+	check('a disabled entry registered no tools', tools.schemas().some((schema) => schema.name.startsWith('mcp__off__')), false)
+}
+
+{
+	// A failed save must refuse every entry it accepted, and mount nothing.
+	const tools = makeTools([])
+	const { manager } = makeManager({ tools, loader: makeLoader([]), writeThrows: true, onMount: mountPublishesOneTool })
+	const results = await manager.apply({ kind: OP.MCP_IMPORT, json: { a: { command: 'node' }, b: { command: 'node' } } })
+	check('a failed persist refuses every entry', results.map((result) => result.status), [STATUS.REFUSED, STATUS.REFUSED])
+	check('the write failure is reported', results[0].detail.includes('disk is full'), true)
+	check('nothing was mounted after a failed save', tools.schemas().length, 0)
+}
+
+{
+	// A missing document is a refusal, not a crash.
+	const { manager, getLastWrite } = makeManager({ tools: makeTools([]), loader: makeLoader([]) })
+	const results = await manager.apply({ kind: OP.MCP_IMPORT })
+	check('a missing document is refused', results[0].status, STATUS.REFUSED)
+	check('a missing document wrote nothing', getLastWrite(), undefined)
+}
+
+{
+	// The batch contract stays flat: an import contributes its results in place.
+	const { manager } = makeManager({ tools: makeTools([]), loader: makeLoader([]), onMount: mountPublishesOneTool })
+	const batch = await manager.applyBatch([
+		{ kind: OP.MCP_IMPORT, json: { one: { command: 'node' }, two: { command: 'node' } } },
+		{ kind: 'mcp.nonsense' }
+	])
+	check('an import contributes one result per server', batch.length, 3)
+	check('the results are the import ones', batch.slice(0, 2).map((result) => result.target), ['one', 'two'])
+	check('the following op still gets its own result', batch[2].kind, 'mcp.nonsense')
 }
 
 // ---------------------------------------------------------------------------

@@ -11,6 +11,7 @@
 
 | 版本 | 日期 | 提交 | 内容 |
 |---|---|---|---|
+| 1.5.0 | 2026-11-13 | 见下 | 新增 JSON 导入：粘贴 `mcpServers` 文档即可批量添加 MCP 服务器 |
 | 1.4.4 | 2026-11-08 | 见下 | 澄清 MCP 面板的作用范围：只覆盖 DSH 组合层，不读其它客户端配置 |
 | 1.4.3 | 2026-11-08 | `891f1a8` | 在 DSH 0.2.2-rc.1 上逐项验证；测试门禁不再依赖已删除的技能树 |
 | 1.4.2 | 2026-11-08 | `036e8fb` | 源码移入插件集合目录的子目录；文档随之更新 |
@@ -41,6 +42,67 @@
 版本号补 tag，只会把歧义固化成「官方发布」。历史保留原样，在此如实记录。
 
 `test/version-check.mjs` 会阻止这件事再次发生：同一个版本号在下方出现两次即测试失败。
+
+## [1.5.0] - 2026-11-13
+
+### 新增：粘贴 JSON 导入 MCP 服务器
+
+**问题**：MCP 服务器只能一台一台手填表单。用户手上通常已经有一段现成的
+`mcpServers` 配置（Claude Desktop / Claude Code / Cursor / VS Code），逐项重填
+既慢又容易抄错参数。
+
+**做法**：MCP 分区新增「导入 JSON」。粘贴一段文档即可，解析在主机侧完成：
+
+```json
+{
+  "mcpServers": {
+    "bing-search": { "command": "npx", "args": ["-y", "bing-cn-mcp"] }
+  }
+}
+```
+
+- 接受 `mcpServers`（Claude / Cursor）与 `servers`（VS Code）两种外层键，也接受
+  直接以服务器名为键的裸映射；一次可导入任意多台。
+- `stdio`（`command` / `args` / `env` / `cwd`）与 `streamable-http`
+  （`url` / `headers`）都支持；`type: "http"` 与 `type: "streamable-http"` 等价。
+- **`sse` 明确拒绝**，不会偷偷映射成 streamable-http：宿主没有 SSE 传输，
+  假装接受只会把失败推迟到连接时。
+- `disabled: true` / `enabled: false` 的条目照常声明，但不立即连接。
+- 整个文档**一次写入**，然后逐台挂载。任一名字非法、或已存在，只影响它自己：
+  每台服务器各自一条结果（`applied` / `restart-required` / `refused` /
+  `unchanged`），页面逐行显示，不做「一句话汇总」。
+- 已由本插件声明的同名服务器**不会被覆盖**（报 `unchanged`）；要改配置仍走
+  「编辑」或 `mcp.configure`。由外部层挂载的同名服务器报 `refused` 并说明原因。
+- 新操作 `mcp.import`（`{kind: "mcp.import", json: "…"}` 或 `servers: {…}`）走同一条
+  `/skill-mcp-panel/apply` 通道，因此脚本也能用；它是唯一返回**多条**结果的
+  操作，顺序与文档一致。
+
+### 实现
+
+- `lib/mcp.js` 新增纯函数 `parseMcpServers()`：不抛异常，每条拒绝都带可执行的
+  原因（哪个名字、哪个字段、为什么）。它复用 `normalizeConfig()` 作为唯一的
+  模式校验，因此导入能存下的东西与等价表单提交完全一致。
+- `lib/contract.js` 新增 `OP.MCP_IMPORT`；`lib/index.js` 在派发处把数组结果展平，
+  线上契约保持「一个扁平结果列表」。
+
+### 测试
+
+- `test/mcp-inventory.mjs`：两份用户给的示例文档逐字段断言；14 类非法文档；
+  一次写盘、部分成功、外部层冲突、写盘失败、禁用条目、批量结果展平。
+- `test/ui-page.mjs`：表单 → 提交 → **原样**转发文本 → 逐行结果；
+  有失败项时表单保持打开。
+- `test/host-live.mjs`：真实插件管线 + 真实 HTTP 路由上跑一次导入，断言
+  **一次**设置写入、重复导入 `unchanged`、坏 JSON 被拒绝。
+
+### 顺手修掉的两个缺陷
+
+- **测试夹具**：`ctx.plugin` 引用了不存在的 `options`，错误被 `mount()` 吞成
+  `restart-required`，于是离线夹具从来没有真正走过「挂载成功」分支。现在
+  `onMount` 是夹具的真实参数，`dispose()` 也会撤销它注册的工具。
+- **文案表**：`docs/copy-zh-en.md` 声明「110 个键」，实现里已是 122 个，清单
+  还漏记了 `mcp.hint.stdio`、`mcp.hint.http`、`mcp.save`、`mcp.create`。
+  现在清单与实现逐键相等、数量也一致，并由 `test/ui-page.mjs` 断言
+  （此前没有任何东西执行这个声明）。
 
 ---
 
