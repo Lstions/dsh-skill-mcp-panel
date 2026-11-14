@@ -1,14 +1,19 @@
-# dsh-skill-mcp-panel
+# @lstions/dsh-skill-mcp-panel
+
+> **Name note:** this package is published under the scoped name
+> `@lstions/dsh-skill-mcp-panel`. It is **not** the similarly named
+> `dsh-skill-mcp-panel` published by another author — the scope keeps the two
+> from being confused when both are installed.
 
 A recursive, multi-root skill provider for the DeepSeek Harness (DSH), with
 per-skill switches, duplicate-name reporting, MCP server management, and a
 bilingual settings UI.
 
-This folder **is** the plugin package: `package.json` declares
-`dsh.bundle.patch`, so installing it also gives the profile a composition layer.
-Its parent `dsh-plugins/` is a plain container holding several plugin projects
-(`skill-mcp-panel/`, `loop-guard/`, `web-password-auth/`) next to the machine's
-`skills/` library — that container is not a repository and ships nothing.
+The package declares `dsh.bundle.patch`, so installing it also gives the
+profile a composition layer: a bundle group with three components — the engine
+(settings, HTTP channel, skill provider, MCP manager) plus a Skills page and an
+MCP page. The page directory is dynamic: disabling a page component removes its
+tab.
 
 ## The problem it solves
 
@@ -45,14 +50,18 @@ duplicate of itself.
 
 ## Install
 
-This folder **is** the plugin, and it declares `dsh.bundle.patch`, so one
-command installs *and* activates it:
+From the npm registry (the normal flow):
 
 ```sh
-# Local checkout (the primary flow, verified end to end)
-dsh plugin --profile web add /absolute/path/to/dsh-plugins/skill-mcp-panel
+dsh plugin --profile web add @lstions/dsh-skill-mcp-panel@1.11.0
+# then restart the profile
+```
 
-# Then restart the profile.
+For development, a local checkout works the same way (the profile sees a
+directory dependency):
+
+```sh
+dsh plugin --profile web add /absolute/path/to/dsh-plugins/skill-mcp-panel
 ```
 
 That works because the launcher reconciles installed dependencies against
@@ -76,7 +85,8 @@ cat ~/.dsh/profiles/web/package.json
 
 | Spec | Result |
 |---|---|
-| `/abs/path` | works — installs and auto-selects the bundle |
+| `@lstions/dsh-skill-mcp-panel@1.11.0` | from the registry — installs and auto-selects the bundle |
+| `/abs/path` or `file:/abs/path` | local checkout, same behaviour |
 | `https://github.com/<owner>/<repo>.git` | pnpm clones it; needs credentials/network |
 | `git@github.com:<owner>/<repo>.git` | **broken in `dsh`** — see below |
 
@@ -104,7 +114,7 @@ layer and therefore wins:
   config:
     providerName: nested-filesystem
     roots:
-      - ~/workspace/dsh-plugins/skills   # this machine's library
+      - ~/.agents/skills   # or any categorised skill library
       - ~/.agents/skills                 # legacy root (symlink to ~/.hermes/skills)
       - ~/.dsh/skills
     maxDepth: 4
@@ -588,7 +598,7 @@ docs/               requirements, UX notes, the zh/en copy table, acceptance rec
 tests/verify/       the independent adversarial acceptance suite
 ```
 
-The **parent** folder is a container, not part of this package:
+The parent folder is a **development** container, not part of the published package:
 
 ```
 dsh-plugins/
@@ -700,7 +710,7 @@ Node.js ≥ 20.13 for `fs.watch(..., { recursive: true })`, plus
 Releases are semver and every released version has a `vX.Y.Z` git tag pointing at
 the exact commit; [CHANGELOG.md](CHANGELOG.md) records what changed.
 
-**Referenceable versions start at `1.4.0`; the current version is `1.10.0`.**
+**Referenceable versions start at `1.4.0`; the current version is `1.11.0`.**
 Before `1.4.0`, this repository published some version numbers twice with
 different content:
 

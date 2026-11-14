@@ -1,5 +1,5 @@
 /**
- * Offline test for dsh-skill-mcp-panel.
+ * Offline test for @lstions/dsh-skill-mcp-panel.
  *
  * Runs the real provider against a fake Cordis context backed by node:fs, so
  * discovery, parsing, dedupe, duplicate policy and config validation are

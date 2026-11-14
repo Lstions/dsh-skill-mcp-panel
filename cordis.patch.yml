@@ -23,11 +23,11 @@
 
 - insert:
     - id: skill-mcp-panel-bundle
-      name: 'dsh-skill-mcp-panel/bundle'
+      name: '@lstions/dsh-skill-mcp-panel/bundle'
       group: true
       config:
         - id: skill-mcp-panel
-          name: 'dsh-skill-mcp-panel'
+          name: '@lstions/dsh-skill-mcp-panel'
           config:
             providerName: nested-filesystem
             # Empty by default. Set roots in the profile patch (or at runtime in
@@ -55,6 +55,6 @@
             skills: {}
             mcpServers: []
         - id: skill-mcp-panel-skills
-          name: 'dsh-skill-mcp-panel/skills'
+          name: '@lstions/dsh-skill-mcp-panel/skills'
         - id: skill-mcp-panel-mcp
-          name: 'dsh-skill-mcp-panel/mcp'
+          name: '@lstions/dsh-skill-mcp-panel/mcp'

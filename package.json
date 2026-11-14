@@ -1,7 +1,6 @@
 {
-  "name": "dsh-skill-mcp-panel",
-  "version": "1.10.0",
-  "private": true,
+  "name": "@lstions/dsh-skill-mcp-panel",
+  "version": "1.11.0",
   "description": "Recursive, multi-root skill discovery with per-skill switches, duplicate-name reporting and MCP server management for the DeepSeek Harness",
   "type": "module",
   "main": "lib/index.js",
@@ -46,14 +45,16 @@
     "cordis.patch.yml",
     "icon.svg",
     "README.md",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "LICENSE"
   ],
   "scripts": {
     "test": "node test/all.mjs",
     "test:tree": "node test/realtree.mjs"
   },
   "engines": {
-    "node": ">=20.13.0"
+    "node": ">=20.13.0",
+    "dsh": ">=0.1.7-alpha.1 <0.3.0-0"
   },
   "dependencies": {
     "@deepseek-ai/schemastery": "^3.18.3"
@@ -69,5 +70,14 @@
     "@deepseek-ai/dsh-settings": {
       "optional": true
     }
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Lstions/dsh-skill-mcp-panel.git"
+  },
+  "publishConfig": {
+    "access": "public",
+    "tag": "latest"
   }
 }

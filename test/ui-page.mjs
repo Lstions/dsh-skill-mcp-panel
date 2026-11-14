@@ -1220,7 +1220,7 @@ function makeLocale(active = 'en') {
   let tree
   let thrown
   try {
-    tree = render({ kind: 'bundle', pkg: { name: 'dsh-skill-mcp-panel', rows: [] } })
+    tree = render({ kind: 'bundle', pkg: { name: '@lstions/dsh-skill-mcp-panel', rows: [] } })
   } catch (problem) {
     thrown = problem
   }
@@ -1235,7 +1235,7 @@ function makeLocale(active = 'en') {
   // row 详情页（{kind:'row', pkg, row}）属于本包时必须渲染。
   check(
     "this plugin's row detail page renders the management section",
-    allText(render({ kind: 'row', pkg: { name: 'dsh-skill-mcp-panel' }, row: { rowId: 'skill-mcp-panel' } })).includes('Skill & MCP management'),
+    allText(render({ kind: 'row', pkg: { name: '@lstions/dsh-skill-mcp-panel' }, row: { rowId: 'skill-mcp-panel' } })).includes('Skill & MCP management'),
     true,
   )
   // 没有 subject（某些宿主路径不传）时也不能崩，按本插件处理。

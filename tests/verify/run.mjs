@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Independent acceptance suite for dsh-skill-mcp-panel.
+ * Independent acceptance suite for @lstions/dsh-skill-mcp-panel.
  *
  *   node tests/verify/run.mjs              # all cases
  *   node tests/verify/run.mjs f31 n4       # named cases only

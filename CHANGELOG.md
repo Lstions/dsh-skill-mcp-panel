@@ -11,6 +11,7 @@
 
 | 版本 | 日期 | 提交 | 内容 |
 |---|---|---|---|
+| 1.11.0 | 2026-11-14 | 见下 | 改名 `@lstions/dsh-skill-mcp-panel` 并补齐 npm 发布元数据（license/repository/engines.dsh/publishConfig） |
 | 1.10.0 | 2026-11-14 | 见下 | MCP 行级操作常显（编辑/删除无需展开）、工具列表限高滚动、修复主面板无法滚动 |
 | 1.9.2 | 2026-11-14 | 见下 | 修禁用态主按钮在深色主题下前景色被 `.skn_button:disabled` 覆盖（对比度 ≈1.9:1） |
 | 1.9.1 | 2026-11-14 | 见下 | 组件 id 改为 `skill-mcp-panel-skills`/`-mcp`；侧边栏主面板整宽独立版式（限宽 920、标题行、间距） |
@@ -50,6 +51,24 @@
 版本号补 tag，只会把歧义固化成「官方发布」。历史保留原样，在此如实记录。
 
 `test/version-check.mjs` 会阻止这件事再次发生：同一个版本号在下方出现两次即测试失败。
+
+## [1.11.0] - 2026-11-14
+
+### 发布：改名为 scoped 包并补齐 npm 元数据
+
+- 包名改为 **`@lstions/dsh-skill-mcp-panel`**（`dsh-skill-mcp-panel` 已被另一位
+  作者的同类插件占用）。bundle patch 的四个模块名、客户端 bundle id、
+  `PACKAGE_NAME`（插件详情页归属判断）与 README 安装命令同步更新；内部
+  composition id / 设置命名空间 `skill-mcp-panel` 不变，已有设置继续有效。
+- 补齐发布元数据：去掉 `private`，新增 `license: MIT` 与 `LICENSE`、
+  `repository`、`engines.dsh`（`>=0.1.7-alpha.1 <0.3.0-0`，让兼容门禁按运行时
+  版本判定，而不是借 `dsh-settings` 的 peer 范围）、
+  `publishConfig: { access: public }`；`@deepseek-ai/schemastery` 保持
+  `dependencies`（运行时 import，与 `dsh-mnemon` 一致）。
+- README：标题与安装段改为 registry 形式，去掉机器相关的绝对路径示例，补
+  「不要与同名包混淆」说明。
+
+---
 
 ## [1.10.0] - 2026-11-14
 

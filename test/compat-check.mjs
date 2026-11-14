@@ -5,7 +5,7 @@
  *
  * DSH 0.2.0-rc.1 上线后，插件在插件列表里被标成「异常」：
  *
- *   dsh-skill-mcp-panel@1.3.0 与 DSH 0.2.0-rc.1 不兼容
+ *   @lstions/dsh-skill-mcp-panel@1.3.0 与 DSH 0.2.0-rc.1 不兼容
  *   （要求 @deepseek-ai/dsh-settings ^0.1.7-alpha.1）
  *
  * 但实际不兼容并不存在 —— settings / skill / webserver / tool 的 API 一个都没少，

@@ -79,7 +79,7 @@ new Function('window', 'document', 'require', source)(globalThis.window, globalT
 const client = registered.factory(requireFn)
 
 // ── 1. module identity ───────────────────────────────────────────────────
-check('bundle registers under the package id', registered.id, 'dsh-skill-mcp-panel')
+check('bundle registers under the package id', registered.id, '@lstions/dsh-skill-mcp-panel')
 
 // ── 2. the inject list decides whether the client half activates at all ──
 // A named service the host does not provide keeps the entry PENDING forever.
