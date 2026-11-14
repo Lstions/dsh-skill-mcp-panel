@@ -122,9 +122,10 @@ function check(label, actual, expected) {
   const patch = readFileSync(join(root, 'cordis.patch.yml'), 'utf8')
   check('the patch inserts one group', /- insert:\n\s+- id: skill-mcp-panel-bundle/.test(patch), true)
   check('the group row is marked group: true', /group: true/.test(patch), true)
-  for (const name of ['dsh-skill-mcp-panel/bundle', "'dsh-skill-mcp-panel'", 'dsh-skill-mcp-panel/pages/skills', 'dsh-skill-mcp-panel/pages/mcp']) {
+  for (const name of ['dsh-skill-mcp-panel/bundle', "'dsh-skill-mcp-panel'", 'dsh-skill-mcp-panel/skills', 'dsh-skill-mcp-panel/mcp']) {
     check(`the group lists ${name}`, patch.includes(name), true)
   }
+  check('the component ids are the plain feature names', ['skill-mcp-panel-skills', 'skill-mcp-panel-mcp'].every((id) => patch.includes('id: ' + id)), true)
   check('the engine keeps its old composition id (settings survive)', /- id: skill-mcp-panel\n\s+name: 'dsh-skill-mcp-panel'/.test(patch), true)
 }
 

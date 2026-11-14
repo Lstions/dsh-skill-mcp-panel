@@ -700,7 +700,7 @@ Node.js ≥ 20.13 for `fs.watch(..., { recursive: true })`, plus
 Releases are semver and every released version has a `vX.Y.Z` git tag pointing at
 the exact commit; [CHANGELOG.md](CHANGELOG.md) records what changed.
 
-**Referenceable versions start at `1.4.0`; the current version is `1.9.0`.**
+**Referenceable versions start at `1.4.0`; the current version is `1.9.1`.**
 Before `1.4.0`, this repository published some version numbers twice with
 different content:
 

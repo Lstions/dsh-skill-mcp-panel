@@ -1,6 +1,6 @@
 {
   "name": "dsh-skill-mcp-panel",
-  "version": "1.9.0",
+  "version": "1.9.1",
   "private": true,
   "description": "Recursive, multi-root skill discovery with per-skill switches, duplicate-name reporting and MCP server management for the DeepSeek Harness",
   "type": "module",
@@ -20,10 +20,10 @@
     "./bundle": {
       "default": "./lib/bundle.js"
     },
-    "./pages/skills": {
+    "./skills": {
       "default": "./lib/pages/skills.js"
     },
-    "./pages/mcp": {
+    "./mcp": {
       "default": "./lib/pages/mcp.js"
     }
   },

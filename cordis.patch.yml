@@ -54,7 +54,7 @@
             entryMode: sidebar
             skills: {}
             mcpServers: []
-        - id: skill-mcp-panel-page-skills
-          name: 'dsh-skill-mcp-panel/pages/skills'
-        - id: skill-mcp-panel-page-mcp
-          name: 'dsh-skill-mcp-panel/pages/mcp'
+        - id: skill-mcp-panel-skills
+          name: 'dsh-skill-mcp-panel/skills'
+        - id: skill-mcp-panel-mcp
+          name: 'dsh-skill-mcp-panel/mcp'
