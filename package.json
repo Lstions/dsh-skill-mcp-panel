@@ -1,6 +1,6 @@
 {
   "name": "dsh-skill-mcp-panel",
-  "version": "1.8.1",
+  "version": "1.9.0",
   "private": true,
   "description": "Recursive, multi-root skill discovery with per-skill switches, duplicate-name reporting and MCP server management for the DeepSeek Harness",
   "type": "module",
@@ -16,7 +16,16 @@
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./locale/*.json": "./locale/*.json",
     "./icon.svg": "./icon.svg",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./bundle": {
+      "default": "./lib/bundle.js"
+    },
+    "./pages/skills": {
+      "default": "./lib/pages/skills.js"
+    },
+    "./pages/mcp": {
+      "default": "./lib/pages/mcp.js"
+    }
   },
   "dsh": {
     "bundle": {

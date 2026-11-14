@@ -261,7 +261,12 @@ function makeState(overrides = {}) {
       managerAvailable: true,
       mcpClientAvailable: true,
     },
-    config: { providerName: 'nested-filesystem', roots: ['/skills'], maxDepth: 4, rank: 300, includeHidden: false, includeFlatRootFiles: true, watch: true, watchDebounceMs: 250, duplicatePolicy: 'first-wins', writeAccess: 'same-origin' },
+    // Page directory: what the bundle's page components registered on the host.
+    pages: [
+      { id: 'skills', labelKey: 'page.skills', order: 10 },
+      { id: 'mcp', labelKey: 'page.mcp', order: 20 },
+    ],
+    config: { providerName: 'nested-filesystem', roots: ['/skills'], maxDepth: 4, rank: 300, includeHidden: false, includeFlatRootFiles: true, watch: true, watchDebounceMs: 250, duplicatePolicy: 'first-wins', writeAccess: 'same-origin', entryMode: 'sidebar' },
     ...overrides,
   }
 }
@@ -481,7 +486,8 @@ function makeLocale(active = 'en') {
   //   settings.plugins.tab     the entry inside Settings → Plugins
   // An earlier version also claimed `settings.plugin.item`, which 0.1.7 removed;
   // a claim on a slot nothing offers is inert, so that must stay absent.
-  check('exactly two slots are claimed', page.registrations.length, 2)
+  // 三个入口 + 一个侧边栏图标行：详情页、设置页、侧边栏主面板、侧边栏图标。
+  check('four slots are claimed', page.registrations.length, 4)
   check(
     'the plugin detail section is claimed (the Plugins page entry)',
     page.registrations.some((r) => r.name === 'plugins.detail.section'),
@@ -492,11 +498,59 @@ function makeLocale(active = 'en') {
     page.registrations.some((r) => r.name === 'settings.plugins.tab'),
     true,
   )
+  const mainPanel = page.registrations.find((r) => r.name === 'main')
+  check('the sidebar main panel is claimed', mainPanel !== undefined, true)
+  check('the main panel key is the plugin namespace', mainPanel?.key, 'skill-mcp-panel')
+  const sidebarRow = page.registrations.find((r) => r.name === 'sidebar.panellist')
+  check('the sidebar row is claimed', sidebarRow !== undefined, true)
+  check('the sidebar row id matches the main panel key', sidebarRow?.id, 'skill-mcp-panel')
+  check('the sidebar row supplies a localized label', typeof sidebarRow?.label, 'function')
+  check('the sidebar row sits after the built-in panels', sidebarRow?.order, 40)
   check('no registration targets the removed settings.plugin.item slot', page.registrations.some((r) => r.name === 'settings.plugin.item'), false)
   // Requiring a service the host no longer provides leaves the entire entry
   // unactivated ("waiting for service"), which is a silent, total failure.
   check('client inject declares slots and locale only', page.inject.join(','), 'slots,locale')
   check('client inject does not require the removed settingsScope', page.inject.includes('settingsScope'), false)
+}
+
+// ─ 1b. 页面目录：标签页来自主机注册的页面 ────────────────────────────────
+{
+  const page = await mountPage(makeState())
+  const tabButtons = buttons(page.tree).filter((node) => node.props.role === 'tab')
+  check('one tab per registered page', tabButtons.length, 2)
+  check('tabs are labelled by the page directory', tabButtons.map(textOf), ['Skills', 'MCP'])
+  check('the first page is selected by default', tabButtons[0].props['aria-selected'], true)
+  const panes = collect(page.tree, (node) => node.props?.role === 'tabpanel')
+  check('both panes are mounted', panes.length, 2)
+  check('only the active pane is visible', panes.map((pane) => pane.props.hidden), [false, true])
+  tabButtons[1].props.onClick()
+  await page.settle()
+  const after = buttons(page.tree).filter((node) => node.props.role === 'tab')
+  check('clicking a tab selects it', after[1].props['aria-selected'], true)
+  const panesAfter = collect(page.tree, (node) => node.props?.role === 'tabpanel')
+  check('switching hides the other pane', panesAfter.map((pane) => pane.props.hidden), [true, false])
+}
+
+// ─ 1c. 入口位置开关：写 config.set entryMode（侧边栏入口的开关）────────────
+{
+  const page = await mountPage(makeState())
+  const select = selects(page.tree).find((node) => node.props['aria-label'] === 'Entry location')
+  check('the entry-location switch is offered', select !== undefined, true)
+  check('it starts from the host value', select?.props.value, 'sidebar')
+  select.props.onChange({ target: { value: 'settings' } })
+  await page.settle()
+  const posted = page.fetchImpl.calls.filter((call) => call.input === '/skill-mcp-panel/apply').pop()
+  const op = JSON.parse(posted.init.body).ops[0]
+  check('choosing settings writes config.set entryMode', op.kind, 'config.set')
+  check('the write carries the chosen mode', [op.key, op.value], ['entryMode', 'settings'])
+}
+
+// ─ 1d. 目录为空（页面组件全部禁用）时仍能看到入口开关 ───────────────────────
+{
+  const page = await mountPage(makeState({ pages: [] }))
+  check('no tabs are rendered without pages', buttons(page.tree).filter((node) => node.props.role === 'tab').length, 0)
+  check('the empty-directory notice is shown', allText(page.tree).includes('No page components'), true)
+  check('the entry switch stays reachable', selects(page.tree).some((node) => node.props['aria-label'] === 'Entry location'), true)
 }
 
 // ─ 2. N3: the page renders with NO usable settings scope ──────────────────

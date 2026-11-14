@@ -635,6 +635,43 @@ mcp-live
 | 主按钮白底白字 | `--dsw-alias-brand-primary` 在暗色主题是**近白**（`neutral-bluish-50`），而页面把文字写死成 `#fff` | 文字改用主题的 on-brand 令牌 `--dsw-alias-label-primary-foreground`（暗色近黑、亮色近白） |
 | 命名与备注要多点一层 | 导入被拆成「粘贴 → 预览 → 逐台确认」两步 | 合并为**一个表单**：文档 + 名称（必填）+ 备注（可选），一次提交；`mcp.import` 新增 `name`/`note` |
 
+## §12 v1.9.0 交付记录（2026-11-14，Lead）
+
+### 12.1 需求
+
+bundle 分组多组件 + 动态页面目录 + 一个侧边栏入口（两个标签页）+ 可选显示开关。
+
+### 12.2 实现
+
+- `cordis.patch.yml` → group（`dsh-skill-mcp-panel/bundle`），三个组件：引擎
+  `skill-mcp-panel`、`skill-mcp-panel-page-skills`、`skill-mcp-panel-page-mcp`；
+  `lib/bundle.js` 用 loader 的 `cordis:group` 内建挂载子项，`lib/pages.js` 提供页面
+  注册表，两个 page 组件通过 `skillMcpPanelPages` 服务注册描述符。
+- 状态文档新增 `pages`；客户端按目录渲染标签页（两个页面都挂载、`hidden` 切换）。
+- 客户端注册 `main` + `sidebar.panellist`（id `skill-mcp-panel`，order 40）；
+  `entryMode` 开关写入宿主配置，客户端 store 订阅后即时挂/卸图标行。
+- 旧宿主无侧边栏槽位时 `ctx.slots.inject` 不触发 → 自动退回设置入口。
+
+### 12.3 活体验证（独立 DSH 实例，端口 3292）
+
+1. 安装后宿主正常启动，`/skill-mcp-panel/state` 返回
+   `pages: [skills(10), mcp(20)]`、`entryMode: sidebar`。
+2. 侧边栏出现 **Skills & MCP** 入口；点击打开主面板，标签页为 **Skills / MCP**，
+   默认选中 Skills（截图 `bundle-02-panel.png`）。
+3. 插件详情页 **Components 3 total · 3 running**，列出引擎与两个页面组件
+   （截图 `bundle-05-detail.png`）。
+4. 页面底部「Entry location」切到 `settings` 后，侧边栏入口**立即消失**
+   （`Plugins | Automation tasks | More`），页面仍可从插件详情页进入；切回 `sidebar`
+   后入口立即恢复（`bundle-04-entry-off.png` / `bundle-06-entry-back.png`）。
+5. 测试：15 个套件全绿（含新增 `test/bundle.mjs` 22 项、ui-page 180 项）。
+
+### 12.4 未覆盖
+
+- 「禁用某个页面组件后标签消失」只做了单测（`pages: []` 渲染与目录为空的分支），
+  没有在活体实例里真的禁用 loader 组件再重启验证。
+- 侧边栏顺序与「更多」菜单的钉住交互未逐项截图。
+
+---
 ## §11 v1.8.0 交付记录（2026-11-13，Lead）
 
 ### 11.1 需求

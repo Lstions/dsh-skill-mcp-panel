@@ -43,6 +43,7 @@ const suites = [
   // asserts the N3 requirement: the page must work with NO usable settings
   // scope, which is exactly what a non-loopback page gets.
   { name: 'management page (sections, N3, three-state, i18n)', file: join(here, 'ui-page.mjs') },
+  { name: 'bundle group + page directory', file: join(here, 'bundle.mjs') },
   { name: 'settings namespace (real provider)', file: join(here, 'namespace-check.mjs') },
   // Host-side suites (devA / devB). Each exits non-zero on any failed check, so
   // the aggregate below can trust `status !== 0` without reading their output.

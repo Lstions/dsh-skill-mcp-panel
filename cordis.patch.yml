@@ -1,4 +1,9 @@
-# The dsh-skill-mcp-panel bundle patch: one insert declaring this plugin's row.
+# The dsh-skill-mcp-panel bundle patch: a GROUP of components.
+#
+# The group is what makes the plugin's parts independently manageable: the
+# engine (settings, HTTP channel, skills provider, MCP manager) and each page
+# component are separate loader entries, so the Plugins page lists them as the
+# bundle's components and one can be disabled without touching the others.
 #
 # Installing the package is enough to activate it. The launcher reconciles
 # installed dependencies against `dsh.profile.bundles` and auto-selects any
@@ -17,28 +22,39 @@
 # belong to the machine that mounts it, in the profile patch, which wins here.
 
 - insert:
-    - id: skill-mcp-panel
-      name: 'dsh-skill-mcp-panel'
+    - id: skill-mcp-panel-bundle
+      name: 'dsh-skill-mcp-panel/bundle'
+      group: true
       config:
-        providerName: nested-filesystem
-        # Empty by default. Set roots in the profile patch (or at runtime in
-        # Settings → Plugins); with no roots the row mounts and contributes
-        # nothing rather than scanning an arbitrary directory.
-        roots: []
-        maxDepth: 4
-        # Lower wins within one layer. 300 sits above the built-in root ranks
-        # (400 user-dsh / 500 user-agents), so this provider wins a name it
-        # discovers by walking deeper than the built-in one-level scan.
-        rank: 300
-        includeHidden: false
-        includeFlatRootFiles: true
-        watch: true
-        watchDebounceMs: 250
-        # first-wins: the first root keeps a contested name (default, safest).
-        # error: the name is withheld entirely, so no caller acts on the wrong file.
-        duplicatePolicy: first-wins
-        # same-origin: writes need a matching Origin plus a JSON content type.
-        # loopback: additionally require a loopback socket.
-        writeAccess: same-origin
-        skills: {}
-        mcpServers: []
+        - id: skill-mcp-panel
+          name: 'dsh-skill-mcp-panel'
+          config:
+            providerName: nested-filesystem
+            # Empty by default. Set roots in the profile patch (or at runtime in
+            # Settings → Plugins); with no roots the row mounts and contributes
+            # nothing rather than scanning an arbitrary directory.
+            roots: []
+            maxDepth: 4
+            # Lower wins within one layer. 300 sits above the built-in root ranks
+            # (400 user-dsh / 500 user-agents), so this provider wins a name it
+            # discovers by walking deeper than the built-in one-level scan.
+            rank: 300
+            includeHidden: false
+            includeFlatRootFiles: true
+            watch: true
+            watchDebounceMs: 250
+            # first-wins: the first root keeps a contested name (default, safest).
+            # error: the name is withheld entirely, so no caller acts on the wrong file.
+            duplicatePolicy: first-wins
+            # same-origin: writes need a matching Origin plus a JSON content type.
+            # loopback: additionally require a loopback socket.
+            writeAccess: same-origin
+            # Where the management page lives: a sidebar main panel with the
+            # page directory, or only the settings/plugin-detail entries.
+            entryMode: sidebar
+            skills: {}
+            mcpServers: []
+        - id: skill-mcp-panel-page-skills
+          name: 'dsh-skill-mcp-panel/pages/skills'
+        - id: skill-mcp-panel-page-mcp
+          name: 'dsh-skill-mcp-panel/pages/mcp'

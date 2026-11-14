@@ -120,7 +120,8 @@ client.apply({
   },
 })
 
-check('exactly two slots are claimed', registrations.length, 2)
+// 三个入口 + 一个侧边栏图标：详情页、设置页、侧边栏主面板、侧边栏图标行。
+check('four registrations are claimed', registrations.length, 4)
 check(
   'the plugin detail section is claimed (Home → Plugins → Installed)',
   registrations.some((r) => r.name === 'plugins.detail.section'),
@@ -131,6 +132,14 @@ check(
   registrations.some((r) => r.name === 'settings.plugins.tab'),
   true,
 )
+const mainPanel = registrations.find((r) => r.name === 'main')
+check('the sidebar main panel is claimed', mainPanel !== undefined, true)
+check('the main panel key is the plugin namespace', mainPanel?.key, 'skill-mcp-panel')
+const sidebarRow = registrations.find((r) => r.name === 'sidebar.panellist')
+check('the sidebar row is claimed', sidebarRow !== undefined, true)
+check('the sidebar row id matches the main panel key', sidebarRow?.id, mainPanel?.key)
+checkTrue('the sidebar row supplies a localized label', typeof sidebarRow?.label === 'function')
+check('the sidebar row sits after the built-in panels', sidebarRow?.order, 40)
 checkFalse('no registration targets the removed settings.plugin.item slot', registrations.some((r) => r.name === 'settings.plugin.item'))
 const tab = registrations.find((r) => r.name === 'settings.plugins.tab')
 check('the tab id is the settings namespace', tab?.id, 'skill-mcp-panel')

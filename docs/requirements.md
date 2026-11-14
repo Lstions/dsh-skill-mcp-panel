@@ -198,6 +198,19 @@ provider、rank、是否可被模型调用、是否可被用户调用。
   (d) `enabled: false` 的条目豁免解析（现在不连接，凭据可以以后配置），
   与命令预检的豁免一致。
 
+- F6.12 **bundle 分组多组件 + 动态页面目录 + 侧边栏入口**：
+  (a) bundle patch 必须是 **group**（`dsh-skill-mcp-panel/bundle`），至少包含引擎、
+  技能页、MCP 页三个 loader 组件；引擎的 composition id 保持 `skill-mcp-panel`，
+  已有设置不得失效。插件详情页的 Components 列表必须能看到这些组件。
+  (b) 页面目录动态化：页面组件通过引擎提供的 `skillMcpPanelPages` 服务注册
+  `{id, labelKey, order}`；`/state` 带出 `pages`；客户端按目录渲染标签页，
+  组件被禁用时对应标签消失；目录为空时页面显示说明且入口开关仍可达。
+  (c) 一个入口两个标签页：客户端注册 `main` 主面板 + `sidebar.panellist` 图标行
+  （同 id，order 40）；主面板内两个标签都保持挂载、用 `hidden` 切换。
+  (d) 入口开关 `entryMode`（`sidebar` | `settings`，默认 `sidebar`）持久化在宿主配置，
+  修改后侧边栏图标行**即时**挂/卸（无需刷新）；关闭后页面仍可从设置→插件进入。
+  (e) 宿主没有侧边栏槽位时自动降级为原有入口，不得报错。
+
 > F6.3 的判定方式由开发在实现时**实测确定**并写入文档：
 > 先试动态挂载（loader 解析模块 + `ctx.plugin()` 挂载），成功则 `applied`；
 > 否则退回「写 patch + 提示重启」并报 `restart-required`。

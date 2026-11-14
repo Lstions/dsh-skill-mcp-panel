@@ -11,6 +11,7 @@
 
 | 版本 | 日期 | 提交 | 内容 |
 |---|---|---|---|
+| 1.9.0 | 2026-11-14 | 见下 | bundle 分组多组件 + 动态页面目录 + 侧边栏入口（两个标签页）与 `entryMode` 开关 |
 | 1.8.1 | 2026-11-13 | 见下 | 修「添加服务器」表单在名字为空时连取消按钮也被禁用（canSubmit 与 busy 分开） |
 | 1.8.0 | 2026-11-13 | 见下 | 支持 `${credential:NAME}` 凭据模板：原样保存、自动展开、保存前解析并拒绝未配置的引用；模板不掩码 |
 | 1.7.0 | 2026-11-13 | 见下 | 导入合并为一个表单（名称必填 + 备注可选）；保存前校验命令；挂载失败带真因；修主按钮对比度 |
@@ -46,6 +47,31 @@
 版本号补 tag，只会把歧义固化成「官方发布」。历史保留原样，在此如实记录。
 
 `test/version-check.mjs` 会阻止这件事再次发生：同一个版本号在下方出现两次即测试失败。
+
+## [1.9.0] - 2026-11-14
+
+### 结构：bundle 分组多组件 + 动态页面目录 + 侧边栏入口
+
+- `cordis.patch.yml` 从单行改为 **group**（`dsh-skill-mcp-panel/bundle`），三个组件：
+  - `skill-mcp-panel` —— 引擎（设置、HTTP 通道、技能 provider、MCP 管理器）；
+  - `skill-mcp-panel-page-skills` —— 技能页面组件；
+  - `skill-mcp-panel-page-mcp` —— MCP 页面组件。
+  引擎的 composition id 仍是 `skill-mcp-panel`，已有的 roots / skills / mcpServers
+  设置继续有效。
+- **动态页面目录**：页面组件把描述符（id / labelKey / order）注册进引擎提供的
+  `skillMcpPanelPages` 服务；`/state` 带出 `pages`，客户端按目录渲染标签页
+  （技能 / MCP）。组件被禁用则对应标签消失；目录为空时页面显示说明，入口开关仍可见。
+- **一个入口，两个标签页**：客户端注册 `main` 主面板 + `sidebar.panellist` 图标行
+  （id 都是 `skill-mcp-panel`，order 40），主面板里是技能 / MCP 两个标签；
+  两个标签都保持挂载、用 `hidden` 切换，切换不丢表单与滚动位置。
+- **入口开关**：新增 `entryMode`（`sidebar` | `settings`，默认 `sidebar`）。开关在页面
+  底部「入口位置」，写入宿主配置；客户端小 store 订阅后**即时**挂/卸侧边栏图标行，
+  无需刷新。关掉后页面仍可从「设置 → 插件」进入。
+- 旧宿主若没有 `main` / `sidebar.panellist` 槽位，`ctx.slots.inject` 的回调不会执行，
+  自动退回原有的两个入口 —— 不需要额外的能力探测。
+- 引擎对 `ctx.provide` 做了防护：没有该 API 的宿主/测试上下文仍能挂载引擎。
+
+---
 
 ## [1.8.1] - 2026-11-13
 
