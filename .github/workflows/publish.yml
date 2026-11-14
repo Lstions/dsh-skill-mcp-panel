@@ -1,0 +1,48 @@
+name: publish
+
+# Route C: publish through npm Trusted Publishing (OIDC) once the package exists.
+# The FIRST release has to be published manually with 2FA (see CHANGELOG 1.11.0):
+# Trusted Publisher can only be configured on an existing package.
+#
+# Setup (one time, on npmjs.com):
+#   1. Package Settings -> Trusted Publisher -> GitHub Actions
+#      owner: Lstions, repo: dsh-skill-mcp-panel, workflow: publish.yml
+#      allow: npm publish
+#   2. Then set "Require 2FA and disallow tokens" for the package.
+#   3. A new trust relationship must publish successfully within 2 days, so run
+#      this workflow right after creating it.
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - name: Install
+        run: pnpm install --no-frozen-lockfile
+      - name: Offline gates
+        run: |
+          node test/version-check.mjs
+          node test/bundle.mjs
+          node test/client.mjs
+          node test/ui-page.mjs
+      - name: Publish (OIDC, no token)
+        run: pnpm publish --no-git-checks --access public
+        env:
+          NODE_AUTH_TOKEN: ''
