@@ -1154,6 +1154,50 @@ function makeLocale(active = 'en') {
   check('an outer-layer server says why it is immutable', allText(external.tree).includes('outer layer'), true)
 }
 
+// ─ 20b. 行级操作常显：编辑/删除无需展开；工具列表限高滚动 ──────────────────
+// 用户反馈：删除按钮藏在展开区里，而装了上百个工具的服务器展开后页面滚不动。
+// 这两条都是可量化的交互约束，必须钉进测试。
+{
+  const page = await mountPage(makeState())
+  check(
+    'no tool list is rendered while the row is collapsed',
+    collect(page.tree, (node) => String(node.props?.className ?? '').includes('skn_toolList')).length,
+    0,
+  )
+  const rowActions = buttons(page.tree).filter((node) => /^(Edit|Remove)$/.test(textOf(node)))
+  check('row actions are visible without expanding', rowActions.length, 2)
+  check(
+    'the row actions name the server they act on',
+    rowActions.map((node) => node.props['aria-label']).sort(),
+    ['Edit: github', 'Remove: github'],
+  )
+  // 直接删：不需要先展开（这正是用户抱怨的路径）。
+  buttons(page.tree).find((node) => textOf(node) === 'Remove').props.onClick()
+  await page.settle()
+  const removeBody = JSON.parse(page.fetchImpl.calls.filter((call) => call.input === '/skill-mcp-panel/apply').pop().init.body)
+  check('removing from the row writes mcp.remove without expanding', removeBody.ops[0].kind, 'mcp.remove')
+
+  // 直接编辑：表单立刻出现，只读区（工具列表）让位，避免上百个工具把表单顶下去。
+  const editPage = await mountPage(makeState())
+  buttons(editPage.tree).find((node) => textOf(node) === 'Edit').props.onClick()
+  await editPage.settle()
+  check(
+    'editing from the row opens the form directly',
+    inputs(editPage.tree).some((node) => node.props.id === 'skill-mcp-panel-mcp-github-command'),
+    true,
+  )
+  check(
+    'the read-only tool list is hidden while editing',
+    collect(editPage.tree, (node) => String(node.props?.className ?? '').includes('skn_toolList')).length,
+    0,
+  )
+  buttons(editPage.tree).find((node) => textOf(node) === 'Cancel').props.onClick()
+  await editPage.settle()
+  const lists = collect(editPage.tree, (node) => String(node.props?.className ?? '').includes('skn_toolList'))
+  check('the tool list is a dedicated scroll container', lists.length, 1)
+  check('every tool row is rendered inside it', collect(lists[0], isType('li')).length, 1)
+}
+
 // ─ 21. 插件详情页的组件必须能真正渲染 ─────────────────────────────────────
 // 这是本轮真正漏掉的覆盖。用户从「主页 → Plugins → Installed → 本插件」进入的
 // 是 plugins.detail.section，它由**另一个注册闭包**渲染。那个组件里出现

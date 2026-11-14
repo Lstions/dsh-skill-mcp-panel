@@ -635,6 +635,46 @@ mcp-live
 | 主按钮白底白字 | `--dsw-alias-brand-primary` 在暗色主题是**近白**（`neutral-bluish-50`），而页面把文字写死成 `#fff` | 文字改用主题的 on-brand 令牌 `--dsw-alias-label-primary-foreground`（暗色近黑、亮色近白） |
 | 命名与备注要多点一层 | 导入被拆成「粘贴 → 预览 → 逐台确认」两步 | 合并为**一个表单**：文档 + 名称（必填）+ 备注（可选），一次提交；`mcp.import` 新增 `name`/`note` |
 
+## §13 v1.10.0 UI 优化记录（2026-11-14，Lead）
+
+### 13.1 问题（用户反馈）
+
+1. MCP 的编辑/删除藏在展开区里，必须先展开才能操作。
+2. 服务器有上百个工具时，展开后整页无法滚动。
+
+### 13.2 诊断（真实实例，120 工具 MCP fixture）
+
+- 行折叠态只有「Expand group」与开关：编辑/删除确实不可见。
+- 展开后：服务器卡片高 4556px、页面 5052px，而宿主 `mainPanel` 是
+  `overflow:hidden` 的列容器、槽位容器 `display:contents`，页面没有滚动容器 ⇒
+  文档高度恒为 900，滚轮/scrollTo 全部无效（`scrollers=[]`）。
+- 修复实验：给页面根加 `flex:1 1 auto;min-height:0;overflow-y:auto` 后
+  scrollTop 可到 4152，说明策略正确。
+
+### 13.3 实现
+
+- 行头：名称/徽标 + 「编辑 / 删除 / 展开」+ 开关同一行；aria-label 带服务器名。
+- 编辑：表单上提到行头下方，工具列表/配置事实在编辑时隐藏。
+- 工具列表：`skn_toolList` max-height 300px 内滚动，行头显示工具数与阶段。
+- 页面：`.skn_pagePanel` 自身为滚动容器（设置页/详情页版式不变）。
+
+### 13.4 验收（真实浏览器，1440×900）
+
+- 折叠行按钮：Edit（aria `Edit: many-tools`）、Remove（aria `Remove: many-tools`）、
+  Expand group；开关同排。
+- 展开带 120 工具：页面 `scrollHeight 1020 / clientHeight 900` 可滚动；工具列表
+  `clientHeight 304 / scrollHeight 4322` 独立滚动，卡片不再线性长高。
+- 编辑：点行头 Edit → 表单为 body 第一个子元素、工具列表隐藏；改备注保存后
+  `/state` 读到 `note: "edited via row"`。
+- 删除：**不展开**直接点 Remove → `/state` 中该服务器消失（`null`）。
+- 单测：ui-page 188 项通过（新增 8 项行级操作/工具列表/编辑让位断言），15 套件全绿。
+
+### 13.5 未覆盖
+
+- 移动端断点（本插件只挂在桌面 Web 面板上，未做 390px 适配验证）。
+- 其余列表（技能分组、冲突列表）未做同样的行级操作梳理。
+
+---
 ## §12 v1.9.0 交付记录（2026-11-14，Lead）
 
 ### 12.1 需求
